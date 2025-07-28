@@ -12,5 +12,5 @@ RUN --mount=type=cache,target=/root/.cache/uv uv sync
 
 ENV PATH="/app/.venv/bin:$PATH"
 
-CMD ["uv", "run", "weather_tool.py"]
+CMD ["uv", "run", "slack_tool.py"]
 
