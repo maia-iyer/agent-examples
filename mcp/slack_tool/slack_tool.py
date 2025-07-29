@@ -1,4 +1,5 @@
 import requests
+import os
 from typing import List, Dict, Any
 from mcp.server.fastmcp import FastMCP
 from slack_sdk import WebClient
