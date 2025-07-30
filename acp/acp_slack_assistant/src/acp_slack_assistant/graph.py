@@ -15,7 +15,7 @@ class ExtendedMessagesState(MessagesState):
 def get_mcpclient():
     return MultiServerMCPClient({
         "slack": {
-            "url": os.getenv("MCP_URL", "http://localhost:8000/mcp"),
+            "url": os.getenv("MCP_URL", "http://localhost:8000/mcp/"),
             "transport": "streamable_http",
         }
     })
