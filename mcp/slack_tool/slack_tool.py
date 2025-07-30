@@ -23,7 +23,7 @@ except Exception as e:
     print(f"An unexpected error occurred during Slack client initialization: {e}")
     slack_client = None
 
-mcp = FastMCP("Slack", port=8000)
+mcp = FastMCP("Slack", stateless_http=True, port=8000)
 
 @mcp.tool()
 def get_channels() -> List[Dict[str, Any]]:
