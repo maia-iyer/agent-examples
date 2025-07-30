@@ -27,7 +27,7 @@ async def get_graph(client) -> StateGraph:
         openai_api_base=config.llm_api_base,
         temperature=0,
     )
-    tools = await client.get_tools()
+    tools = await client.get_tools(server_name="slack")
     llm_with_tools = llm.bind_tools(tools)
 
     # System message
