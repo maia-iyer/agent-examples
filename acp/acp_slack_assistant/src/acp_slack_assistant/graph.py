@@ -27,7 +27,8 @@ async def get_graph(client) -> StateGraph:
         openai_api_base=config.llm_api_base,
         temperature=0,
     )
-    llm_with_tools = llm.bind_tools(client.get_tools())
+    tools = await client.get_tools()
+    llm_with_tools = llm.bind_tools(tools)
 
     # System message
     sys_msg = SystemMessage(content="You are a helpful assistant tasked with providing slack information. You must use the provided tools to complete your task.")
