@@ -74,7 +74,8 @@ async def acp_slack_assistant(input: list[Message]) -> AsyncIterator:
 
     try:
         output = None
-        async with get_mcpclient() as mcpclient:
+        mcpclient = await get_mcpclient()
+        try:
             graph = await get_graph(mcpclient)
             async for event in graph.astream(input, stream_mode="updates"):
                 yield {
