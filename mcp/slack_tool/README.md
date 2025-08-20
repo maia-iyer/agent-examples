@@ -12,6 +12,8 @@ You can configure the server with the following environment variables:
 | `SLACK_BOT_TOKEN` | Yes       | `YOUR_SLACK_BOT_TOKEN` | Access token for the Slack server |
 | `MCP_TRANSPORT`   | No        | `streamable-http`      | Passed into mcp.run to determine mcp transport |
 | `ISSUER`          | No        | - | If populated, will attempt to extract bearer token, fail otherwise. Must be URI format |
+| `HOST`            | No        | `0.0.0.0` | Configure the listen address of the MCP Server |
+| `PORT`            | No        | `8000` | Configure the listen port of the MCP Server |
 
 You can run this locally with `uv run slack_tool.py` so long as the `SLACK_BOT_TOKEN` is set. 
 
