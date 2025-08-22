@@ -11,7 +11,7 @@ class LLMConfig:
                     "model": config.TASK_MODEL_ID,  # Converted to uppercase
                     "base_url": config.LLM_API_BASE,  # Converted to uppercase
                     "api_type": "openai",
-                    "api_key": config.LLM_API_BASE,  # Converted to uppercase
+                    "api_key": config.LLM_API_KEY,  # Converted to uppercase
                     **(
                         {"default_headers": config.EXTRA_HEADERS}
                         if config.EXTRA_HEADERS
@@ -31,7 +31,7 @@ class LLMConfig:
                     "model": config.TASK_MODEL_ID,  # Converted to uppercase
                     "base_url": config.LLM_API_BASE,  # Converted to uppercase
                     "api_type": "openai",
-                    "api_key": config.LLM_API_BASE,  # Converted to uppercase
+                    "api_key": config.LLM_API_KEY,  # Converted to uppercase
                     "response_format": Plan,
                     **(
                         {"default_headers": config.EXTRA_HEADERS}
