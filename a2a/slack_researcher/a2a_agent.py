@@ -3,6 +3,7 @@ Module for A2A Agent.
 """
 
 import logging
+import httpx
 import sys
 import traceback
 from typing import Callable
@@ -36,8 +37,39 @@ class BearerAuthBackend(AuthenticationBackend):
         self.client_id = settings.CLIENT_ID
         self.client_secret = settings.CLIENT_SECRET
 
+    async def introspect_bearer_token(self, token):
+        logger.debug("Introspecting bearer token...")
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.post(
+                    self.introspection_endpoint,
+                    data={
+                        "token": token,
+                        "client_id": self.client_id,
+                        "client_secret": self.client_secret,
+                    },
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                )
+                logger.debug(f"Response to token introspection: {response}")
+
+                if response.status_code != 200:
+                    logger.error(f"Token introspection returned status {response.status_code}")
+                    return None
+                
+                data = response.json()
+                logger.debug(f"data: {data}")
+                if not data.get("active", False):
+                    return None
+                return data
+            except Exception as e:
+                logger.error(f"An unexpected error occurred during token validation")
+                return None
+
     async def validate_bearer_token(self, token):
         logger.debug(f"Validating bearer token...")
+        # introspect bearer token
+        data = await self.introspect_bearer_token(token)
+
         user = SimpleUser(token)
         return AuthCredentials(["authenticated"]), user
 
