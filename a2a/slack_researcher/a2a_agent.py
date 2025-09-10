@@ -36,7 +36,7 @@ class BearerAuthBackend(AuthenticationBackend):
         self.introspection_endpoint = settings.INTROSPECTION_ENDPOINT
         self.client_id = settings.CLIENT_ID
         self.client_secret = settings.CLIENT_SECRET
-        self.audience = settings.AUDIENCE
+        self.expected_audience = settings.AUDIENCE
 
     async def introspect_bearer_token(self, token):
         logger.debug("Introspecting bearer token...")
