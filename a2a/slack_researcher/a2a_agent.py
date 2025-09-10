@@ -84,11 +84,11 @@ class BearerAuthBackend(AuthenticationBackend):
         # introspect bearer token
         data = await self.introspect_bearer_token(token)
         if not data.get("active", False):
-            return None
+            return None, None
         
         # resource validation
-        resource_validated = self.validate_claims(data)
-        if not resource_validated: return None
+        resource_validated = await self.validate_claims(data)
+        if not resource_validated: return None, None
 
         user = SimpleUser(token)
         return AuthCredentials(["authenticated"]), user
