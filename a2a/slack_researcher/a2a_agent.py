@@ -22,6 +22,7 @@ from a2a.types import AgentCapabilities, AgentCard, AgentSkill, TaskState, TextP
 from a2a.utils import new_agent_text_message, new_task
 
 from starlette.responses import JSONResponse
+from starlette.requests import Request
 from starlette.authentication import AuthCredentials, SimpleUser, AuthenticationBackend
 from starlette.middleware.authentication import AuthenticationMiddleware
 
@@ -31,6 +32,27 @@ from slack_researcher.main import SlackAgent
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG, stream=sys.stdout, format='%(levelname)s: %(message)s')
+
+async def on_auth_error(request: Request, e: Exception):
+    # default values
+    status_code = 401
+    message = "Authentication failed"
+    headers = {"WWW-Authenticate": "Bearer"}
+
+    if isinstance(e, AuthenticationError):
+        status_code = e.status_code
+        message = e.detail
+    
+    return JSONResponse(
+        {"error": message},
+        status_code=status_code,
+        headers=headers if status_code == 401 else None
+    )
+
+class AuthenticationError(Exception):
+    def __init__(self, message: str, status_code: int = 401):
+        self.message = message
+        self.status_code = status_code
 
 class BearerAuthBackend(AuthenticationBackend):
     def __init__(self):
@@ -95,44 +117,27 @@ class BearerAuthBackend(AuthenticationBackend):
 
     """ Executed upon request """
     async def authenticate(self, conn):
-        try:
-            if None in [self.introspection_endpoint, self.client_id, self.client_secret]:
-                logger.warning(f"One or more of INTROSPECTION_ENDPOINT, CLIENT_NAME, CLIENT_SECRET env vars are not set. No token validation will be performed. ")
-                return None
+        if None in [self.introspection_endpoint, self.client_id, self.client_secret]:
+            logger.warning(f"One or more of INTROSPECTION_ENDPOINT, CLIENT_NAME, CLIENT_SECRET env vars are not set. No token validation will be performed. ")
+            return None
 
-            # perform token validation
-            token = await self.get_token(conn)
-            if token is None:
-                return JSONResponse(
-                    {"error": "Authentication required", "detail": "Bearer token not found in Authorization header."},
-                    status_code=401,
-                    headers={"WWW-Authenticate": "Bearer"},
-                )
+        # perform token validation
+        token = await self.get_token(conn)
+        if token is None:
+            raise AuthenticationError(message = "Bearer token not found in Authorization header.")
 
-            # introspect token
-            data = await self.introspect_bearer_token(token)
-            if data is None or not data.get("active", False):
-                return JSONResponse(
-                    {"error": "Invalid token", "detail": "The provided token is invalid, expired, or inactive."},
-                    status_code=401,
-                    headers={"WWW-Authenticate": "Bearer"},
-                )
+        # introspect token
+        data = await self.introspect_bearer_token(token)
+        if data is None or not data.get("active", False):
+            raise AuthenticationError(message = "he provided token is invalid, expired, or inactive.")
 
-            # resource validation
-            resource_validated = await self.validate_claims(data)
-            if not resource_validated: 
-                return JSONResponse(
-                    {"error": "Forbidden", "detail": "The token is not valid for this resource (audience mismatch)."},
-                    status_code=403,
-                    headers={"WWW-Authenticate": "Bearer"},
-                )
+        # resource validation
+        resource_validated = await self.validate_claims(data)
+        if not resource_validated: 
+            raise AuthenticationError(message = "The token is not valid for this resource (audience mismatch).", status_code=403)
 
-            user = SimpleUser(token)
-            return AuthCredentials(["authenticated"]), user
-
-        except Exception as e:
-            logger.error("Exception when attempting to obtain user token")
-            logger.error(e)
+        user = SimpleUser(token)
+        return AuthCredentials(["authenticated"]), user
     
 
 def get_agent_card(host: str, port: int):
@@ -323,6 +328,6 @@ def run():
     )
 
     app = server.build()  # this returns a Starlette app
-    app.add_middleware(AuthenticationMiddleware, backend=BearerAuthBackend())
+    app.add_middleware(AuthenticationMiddleware, backend=BearerAuthBackend(), on_error=on_auth_error)
 
     uvicorn.run(app, host="0.0.0.0", port=settings.SERVICE_PORT)
