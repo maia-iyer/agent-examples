@@ -34,7 +34,7 @@ from slack_researcher.main import SlackAgent
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG, stream=sys.stdout, format='%(levelname)s: %(message)s')
 
-async def on_auth_error(request: Request, e: Exception):
+def on_auth_error(request: Request, e: Exception):
     # default values
     status_code = 401
     message = "Authentication failed"
