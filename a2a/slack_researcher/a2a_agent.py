@@ -36,6 +36,7 @@ class BearerAuthBackend(AuthenticationBackend):
         self.introspection_endpoint = settings.INTROSPECTION_ENDPOINT
         self.client_id = settings.CLIENT_ID
         self.client_secret = settings.CLIENT_SECRET
+        self.audience = settings.AUDIENCE
 
     async def introspect_bearer_token(self, token):
         logger.debug("Introspecting bearer token...")
@@ -65,10 +66,29 @@ class BearerAuthBackend(AuthenticationBackend):
                 logger.error(f"An unexpected error occurred during token validation")
                 return None
 
+    # return true if properly validated, false otherwise
+    async def validate_claims(self, token_data):
+        logger.debug("Validating bearer token claims...")
+
+        # check audience
+        if self.expected_audience is None:
+            logger.warning(f"No AUDIENCE env var set - failing resource validation")
+            return False
+        if not "aud" in token_data:
+            logger.error(f"No aud claim in token - failing resource validation")
+        included_audiences = token_data["aud"]
+        return self.audience in included_audiences
+
     async def validate_bearer_token(self, token):
         logger.debug(f"Validating bearer token...")
         # introspect bearer token
         data = await self.introspect_bearer_token(token)
+        if not data.get("active", False):
+            return None
+        
+        # resource validation
+        resource_validated = self.validate_claims(data)
+        if not resource_validated: return None
 
         user = SimpleUser(token)
         return AuthCredentials(["authenticated"]), user
