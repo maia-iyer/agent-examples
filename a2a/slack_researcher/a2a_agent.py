@@ -100,7 +100,7 @@ class BearerAuthBackend(AuthenticationBackend):
         if not "aud" in token_data:
             logger.error(f"No aud claim in token - failing resource validation")
         included_audiences = token_data["aud"]
-        return self.audience in included_audiences
+        return self.expected_audience in included_audiences
 
     async def get_token(self, conn):
         logger.debug(f"Obtaining bearer token...")
