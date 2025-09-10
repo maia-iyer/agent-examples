@@ -41,7 +41,7 @@ async def on_auth_error(request: Request, e: Exception):
 
     if isinstance(e, AuthenticationError):
         status_code = e.status_code
-        message = e.detail
+        message = e.message
     
     return JSONResponse(
         {"error": message},
