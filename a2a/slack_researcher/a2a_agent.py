@@ -21,6 +21,7 @@ from a2a.server.tasks import InMemoryTaskStore, TaskUpdater
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill, TaskState, TextPart, SecurityScheme, HTTPAuthSecurityScheme
 from a2a.utils import new_agent_text_message, new_task
 
+from starlette.responses import JSONResponse
 from starlette.authentication import AuthCredentials, SimpleUser, AuthenticationBackend
 from starlette.middleware.authentication import AuthenticationMiddleware
 
@@ -79,20 +80,6 @@ class BearerAuthBackend(AuthenticationBackend):
         included_audiences = token_data["aud"]
         return self.audience in included_audiences
 
-    async def validate_bearer_token(self, token):
-        logger.debug(f"Validating bearer token...")
-        # introspect bearer token
-        data = await self.introspect_bearer_token(token)
-        if not data.get("active", False):
-            return None, None
-        
-        # resource validation
-        resource_validated = await self.validate_claims(data)
-        if not resource_validated: return None, None
-
-        user = SimpleUser(token)
-        return AuthCredentials(["authenticated"]), user
-
     async def get_token(self, conn):
         logger.debug(f"Obtaining bearer token...")
         headers = conn.headers
@@ -116,10 +103,33 @@ class BearerAuthBackend(AuthenticationBackend):
             # perform token validation
             token = await self.get_token(conn)
             if token is None:
-                logger.error(f"Expected but could not obtain access token.")
-                return None
-            credentials, user = await self.validate_bearer_token(token)
-            return credentials, user
+                return JSONResponse(
+                    {"error": "Authentication required", "detail": "Bearer token not found in Authorization header."},
+                    status_code=401,
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+
+            # introspect token
+            data = await self.introspect_bearer_token(token)
+            if not data.get("active", False):
+                return JSONResponse(
+                    {"error": "Invalid token", "detail": "The provided token is invalid, expired, or inactive."},
+                    status_code=401,
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+
+            # resource validation
+            resource_validated = await self.validate_claims(data)
+            if not resource_validated: 
+                return JSONResponse(
+                    {"error": "Forbidden", "detail": "The token is not valid for this resource (audience mismatch)."},
+                    status_code=403,
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+
+            user = SimpleUser(token)
+            return AuthCredentials(["authenticated"]), user
+
         except Exception as e:
             logger.error("Exception when attempting to obtain user token")
             logger.error(e)
