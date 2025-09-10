@@ -111,7 +111,7 @@ class BearerAuthBackend(AuthenticationBackend):
 
             # introspect token
             data = await self.introspect_bearer_token(token)
-            if not data.get("active", False):
+            if data is None or not data.get("active", False):
                 return JSONResponse(
                     {"error": "Invalid token", "detail": "The provided token is invalid, expired, or inactive."},
                     status_code=401,
