@@ -24,6 +24,7 @@ from a2a.utils import new_agent_text_message, new_task
 from starlette.responses import JSONResponse
 from starlette.requests import Request
 from starlette.authentication import AuthCredentials, SimpleUser, AuthenticationBackend
+from starlette.authentication import AuthenticationError as StarletteAuthenticationError
 from starlette.middleware.authentication import AuthenticationMiddleware
 
 from slack_researcher.config import settings, Settings
@@ -41,7 +42,7 @@ async def on_auth_error(request: Request, e: Exception):
 
     if isinstance(e, AuthenticationError):
         status_code = e.status_code
-        message = e.message
+    message = str(e)
     
     return JSONResponse(
         {"error": message},
@@ -49,10 +50,10 @@ async def on_auth_error(request: Request, e: Exception):
         headers=headers if status_code == 401 else None
     )
 
-class AuthenticationError(Exception):
+class AuthenticationError(StarletteAuthenticationError):
     def __init__(self, message: str, status_code: int = 401):
-        self.message = message
         self.status_code = status_code
+        super().__init__(message)
 
 class BearerAuthBackend(AuthenticationBackend):
     def __init__(self):
