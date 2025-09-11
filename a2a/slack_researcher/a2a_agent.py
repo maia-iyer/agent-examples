@@ -121,6 +121,11 @@ class BearerAuthBackend(AuthenticationBackend):
         if None in [self.introspection_endpoint, self.client_id, self.client_secret]:
             logger.warning(f"One or more of INTROSPECTION_ENDPOINT, CLIENT_NAME, CLIENT_SECRET env vars are not set. No token validation will be performed. ")
             return None
+        
+        # bypass authentication for agent card
+        if conn.scope.get("path") == "/.well-known/agent.json":
+            logger.debug("Bypassing authentication for public /.well-known/agent.json path.")
+            return None # Allows the request to proceed without authentication
 
         # perform token validation
         token = await self.get_token(conn)
