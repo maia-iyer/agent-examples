@@ -43,7 +43,7 @@ class BearerAuthBackend(AuthenticationBackend):
 
         self.claims_options = {}
         if settings.AUDIENCE is None:
-            logger.debug(f"AUDIENCE env var not set. No audience check will be performed. ")
+            logger.debug(f"AUDIENCE or CLIENT_ID not set. No audience check will be performed. ")
         else:
             self.claims_options["aud"] = {"essential": True, "value": settings.AUDIENCE}
         if settings.ISSUER is None:
@@ -120,6 +120,7 @@ class TokenExchanger:
         self.token_url = settings.TOKEN_URL
         self.client_id = settings.CLIENT_ID
         self.client_secret = settings.CLIENT_SECRET
+        logging.debug(f"Token Exchanger parameters: {self.token_url}, {self.client_id}, {self.client_secret}")
 
     async def exchange(self, subject_token: str, audience: str = None, scope: str = None) -> str:
         # headers
@@ -138,7 +139,7 @@ class TokenExchanger:
         if not scope is None:
             data['scope'] = scope
         # make token endpoint call
-        logger.debug('Performing token exchange')
+        logger.debug(f"Performing token exchange with audience {audience}, scope {scope}")
         async with httpx.AsyncClient() as client:
             try: 
                 response = await client.post(self.token_url, data=data, headers=headers)
