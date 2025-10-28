@@ -22,10 +22,8 @@ mcp = FastMCP("Flights")
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), stream=sys.stdout, format='%(levelname)s: %(message)s')
 
-def _get_currency() -> str:
-    return os.getenv("FAST_FLIGHTS_CURRENCY", "USD")
 
-def _result_to_dict(r: Result, effective_currency: str) -> List[Dict[str, Any]]:
+def _result_to_dict(r: Result) -> List[Dict[str, Any]]:
     flights = getattr(r, 'flights', [])
     if not flights:
         return [{
@@ -33,7 +31,6 @@ def _result_to_dict(r: Result, effective_currency: str) -> List[Dict[str, Any]]:
             "airline": None,
             "price": "N/A",
             "price_value": None,
-            "currency": effective_currency,
             "duration_minutes": None,
             "stops": None,
             "departure": None,
@@ -45,9 +42,7 @@ def _result_to_dict(r: Result, effective_currency: str) -> List[Dict[str, Any]]:
         flight_results.append({
             "id": getattr(flight, 'name', None),
             "airline": getattr(flight, 'name', None),
-            "price": _format_money(getattr(r, 'current_price', None), effective_currency),
             "price_value": getattr(r, 'current_price', None),
-            "currency": effective_currency,
             "duration_minutes": getattr(flight, 'duration', None),
             "stops": getattr(flight, 'stops', None),
             "departure": getattr(flight, 'departure', None),
@@ -57,15 +52,6 @@ def _result_to_dict(r: Result, effective_currency: str) -> List[Dict[str, Any]]:
         })
     
     return flight_results
-
-
-def _format_money(value: Any, currency: str) -> str:
-    try:
-        amount = float(value)
-    except Exception:
-        return str(value)
-    return f"{currency} {amount:,.2f}"
-
 
 def _parse_iso_date(d: str) -> Optional[date]:
     if not d:
@@ -81,6 +67,32 @@ def _date_in_past(d: date) -> bool:
         return d < date.today()
     except Exception:
         return False
+
+
+def _coerce_int(val: Any, name: str, default: int) -> tuple[int, Optional[str]]:
+    """Coerce a string or int to a non-negative int.
+
+    This simpler variant accepts:
+    - ints (returned as-is)
+    - strings that parse directly with int(), e.g. "1" or " 2 "
+
+    Returns (int, None) on success or (default, error_message) on failure.
+    """
+    if isinstance(val, int):
+        i = val
+    elif isinstance(val, str):
+        s = val.strip()
+        try:
+            i = int(s)
+        except Exception:
+            return default, f"Invalid integer value for '{name}': {val!r}"
+    else:
+        return default, f"Invalid type for '{name}': expected int or str, got {type(val).__name__}"
+
+    if i < 0:
+        return default, f"'{name}' must be >= 0"
+
+    return i, None
 
 @mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True})
 def search_airports(query: str, limit: int = 10) -> str:
@@ -99,17 +111,11 @@ def search_airports(query: str, limit: int = 10) -> str:
     try:
         results = ff_search_airport(query)
     except Exception as e:
-        logger.error("airport search failed: %s", e)
         return json.dumps({"error": str(e)})
 
     airports = []
     for a in (results or [])[:limit]:
-        if hasattr(a, "value"):
-            airports.append(getattr(a, "value"))
-        elif hasattr(a, "name"):
-            airports.append(getattr(a, "name"))
-        else:
-            airports.append(str(a))
+        airports.append(getattr(a, "value"))
 
     return json.dumps(airports)
 
@@ -119,15 +125,14 @@ def search_flights(
     from_airport: str,
     to_airport: str,
     departure_date: str,
-    return_date: str | None = None,
-    cabin: str | None = None,
-    adults: int = 1,
-    children: int = 0,
-    infants_in_seat: int = 0,
-    infants_on_lap: int = 0,
-    currency: str | None = None,
-    airlines: str | None = None,
-    max_stops: int | None = None,
+    return_date: Optional[str] = None,
+    cabin: Optional[str] = None,
+    adults: Optional[int] = 1,
+    children: Optional[int] = 0,
+    infants_in_seat: Optional[int] = 0,
+    infants_on_lap: Optional[int] = 0,
+    airlines: Optional[str] = None,
+    max_stops: Optional[int] = None,
 ) -> str:
     """Search flights between two cities.
 
@@ -138,15 +143,27 @@ def search_flights(
     Optional parameters:
     - return_date: YYYY-MM-DD (for round-trip flights)
     - cabin: economy|premium-economy|business|first (defaults to economy)
-    - adults: number of adult passengers (defaults to 1)
-    - children: number of child passengers (defaults to 0)
-    - infants_in_seat: number of infants with seats (defaults to 0)
-    - infants_on_lap: number of infants on lap (defaults to 0)
-    - currency: 3-letter currency code (defaults to USD)
+    - adults: an interger number of adult passengers (defaults to 1)
+    - children: an integer number of child passengers (defaults to 0)
+    - infants_in_seat: an integer number of infants with seats (defaults to 0)
+    - infants_on_lap: an interger number of infants on lap (defaults to 0)
     - airlines: comma-separated IATA codes or alliances (SKYTEAM, STAR_ALLIANCE, ONEWORLD)
-    - max_stops: maximum number of stops (defaults to no limit)
+    - max_stops: an integer, maximum number of stops (defaults to no limit)
     """
-    effective_currency = currency or _get_currency()
+    # Coerce passenger counts to integers (accept numeric strings) - necessary due to an fastMCP issue
+    adults, err = _coerce_int(adults, "adults", 1)
+    if err:
+        return json.dumps({"error": err, "adults": adults})
+    children, err = _coerce_int(children, "children", 0)
+    if err:
+        return json.dumps({"error": err, "children": children})
+    infants_in_seat, err = _coerce_int(infants_in_seat, "infants_in_seat", 0)
+    if err:
+        return json.dumps({"error": err, "infants_in_seat": infants_in_seat})
+    infants_on_lap, err = _coerce_int(infants_on_lap, "infants_on_lap", 0)
+    if err:
+        return json.dumps({"error": err, "infants_on_lap": infants_on_lap})
+
     # Validate dates are not in the past
     dep_date_obj = _parse_iso_date(departure_date)
     if dep_date_obj is None:
@@ -164,7 +181,7 @@ def search_flights(
         # Ensure return date is not before departure
         if ret_date_obj < dep_date_obj:
             return json.dumps({"error": "return_date cannot be before departure_date", "departure_date": departure_date, "return_date": return_date})
-    
+        
     flight_data_kwargs = {
         "date": departure_date,
         "from_airport": from_airport,
@@ -215,7 +232,6 @@ def search_flights(
                 "children": children,
                 "infants_in_seat": infants_in_seat,
                 "infants_on_lap": infants_on_lap,
-                "currency": effective_currency,
                 "airlines": airlines,
                 "max_stops": max_stops,
             }
@@ -234,7 +250,6 @@ def search_flights(
                 "children": children,
                 "infants_in_seat": infants_in_seat,
                 "infants_on_lap": infants_on_lap,
-                "currency": effective_currency,
                 "airlines": airlines,
                 "max_stops": max_stops,
             }
@@ -248,15 +263,33 @@ def search_flights(
     )
     
     logger.debug(f"Searching flights: {flight_data_list}")
-    result: Result = get_flights(
+    try:
+        result: Result = get_flights(
         flight_data=flight_data_list,
         trip=trip_type,
         seat=seat_type,
         passengers=passengers,
-        fetch_mode="fallback",
+        fetch_mode="fallback"
     )
+    except:
+        return json.dumps({
+            "error": "An error occurred while fetching flight data, there may be no available flights for the given parameters.",
+            "request": {
+                "from_airport": from_airport,
+                "to_airport": to_airport,
+                "departure_date": departure_date,
+                "return_date": return_date,
+                "cabin": cabin,
+                "adults": adults,
+                "children": children,
+                "infants_in_seat": infants_in_seat,
+                "infants_on_lap": infants_on_lap,
+                "airlines": airlines,
+                "max_stops": max_stops,
+            }
+        })
 
-    summary: List[Dict[str, Any]] = _result_to_dict(result, effective_currency)
+    summary: List[Dict[str, Any]] = _result_to_dict(result)
     return json.dumps({
         "request": {
             "from_airport": from_airport,
@@ -268,7 +301,6 @@ def search_flights(
             "children": children,
             "infants_in_seat": infants_in_seat,
             "infants_on_lap": infants_on_lap,
-            "currency": effective_currency,
             "airlines": airlines,
             "max_stops": max_stops,
         },
