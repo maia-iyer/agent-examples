@@ -49,7 +49,6 @@ def get_client_id() -> str:
 # GCP credentials
 GCP_SERVICE_ACCOUNT_KEY = os.getenv("GCP_SERVICE_ACCOUNT_KEY")
 GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID")
-BUCKET_NAME = os.getenv("BUCKET_NAME")
 
 # AWS credentials
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
@@ -62,10 +61,7 @@ AZURE_STORAGE_ACCOUNT_NAME = os.getenv("AZURE_STORAGE_ACCOUNT_NAME")
 AZURE_STORAGE_ACCOUNT_KEY = os.getenv("AZURE_STORAGE_ACCOUNT_KEY")
 
 def parse_cloud_uri(uri: str) -> Tuple[str, str, str]:
-    """
-    Parse cloud storage URI and return (provider, bucket/container, path).
-    Supports: gs://bucket/path, s3://bucket/path, azure://container/path
-    """
+    """Parse cloud storage URI and return (provider, bucket/container, path)."""
     if uri.startswith("gs://"):
         parts = uri.replace("gs://", "").split("/", 1)
         return "gcs", parts[0], parts[1] if len(parts) > 1 else ""
@@ -248,7 +244,7 @@ def copy_object_unified(provider: str, source_bucket: str, source_path: str,
 def delete_object_unified(provider: str, bucket_or_container: str, path: str) -> bool:
     """Delete object from any cloud provider."""
     if provider == "gcs":
-        storage_client = get_storage_client()
+        storage_client = get_gcs_client()
         if not storage_client:
             raise Exception("Could not authenticate with GCP")
         
@@ -279,7 +275,7 @@ def delete_object_unified(provider: str, bucket_or_container: str, path: str) ->
 def download_text_unified(provider: str, bucket_or_container: str, path: str) -> str:
     """Download text content from any cloud provider."""
     if provider == "gcs":
-        storage_client = get_storage_client()
+        storage_client = get_gcs_client()
         if not storage_client:
             raise Exception("Could not authenticate with GCP")
         
@@ -331,7 +327,7 @@ except Exception as e:
 mcp = FastMCP("CloudStorage", auth=verifier)
 
 @mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True})
-def get_objects(bucket_uri: Optional[str] = None) -> str:
+def get_objects(bucket_uri: str) -> str:
     """Get all objects from a cloud storage bucket/container."""
     # Get access token for authentication
     access_token: AccessToken | None = get_access_token()
@@ -340,13 +336,7 @@ def get_objects(bucket_uri: Optional[str] = None) -> str:
     
     try:
         # Parse URI to determine provider and bucket
-        if bucket_uri:
-            provider, bucket_name, _ = parse_cloud_uri(bucket_uri)
-        else:
-            provider = "gcs"
-            bucket_name = BUCKET_NAME
-            if not bucket_name:
-                return json.dumps({"error": "No bucket specified and BUCKET_NAME not set"})
+        provider, bucket_name, _ = parse_cloud_uri(bucket_uri)
         
         logger.debug(f"Getting objects from {provider} bucket '{bucket_name}'")
         

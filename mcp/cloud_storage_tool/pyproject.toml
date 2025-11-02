@@ -7,5 +7,7 @@ requires-python = ">=3.13"
 dependencies = [
     "fastmcp",
     "google-cloud-storage",
-    "jwt"
+    "jwt",
+    "boto3",
+    "azure-storage-blob"
 ]
