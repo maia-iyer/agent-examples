@@ -6,12 +6,28 @@ import os
 import sys
 import jwt
 import yaml
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional, Tuple
 from fastmcp import FastMCP
 from fastmcp.server.dependencies import get_access_token, AccessToken
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 from google.cloud import storage
 from google.oauth2 import service_account
+
+# AWS S3 imports
+try:
+    import boto3
+    from botocore.exceptions import ClientError, NoCredentialsError
+    AWS_AVAILABLE = True
+except ImportError:
+    AWS_AVAILABLE = False
+
+# Azure Blob Storage imports
+try:
+    from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
+    from azure.core.exceptions import ResourceNotFoundError, AzureError
+    AZURE_AVAILABLE = True
+except ImportError:
+    AZURE_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), stream=sys.stdout, format='%(levelname)s: %(message)s')
@@ -42,12 +58,40 @@ def get_client_id() -> str:
     except KeyError:
         raise KeyError('SVID JWT is missing required "sub" claim.')
 
-# Setup GCP credentials
-GCP_SERVICE_ACCOUNT_KEY = os.getenv("GCP_SERVICE_ACCOUNT_KEY")  # JSON string or file path
+# GCP credentials
+GCP_SERVICE_ACCOUNT_KEY = os.getenv("GCP_SERVICE_ACCOUNT_KEY")
 GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID")
-DEFAULT_BUCKET = os.getenv("DEFAULT_BUCKET")
+BUCKET_NAME = os.getenv("BUCKET_NAME")
 
-def get_storage_client():
+# AWS credentials
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
+AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+
+# Azure credentials
+AZURE_STORAGE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+AZURE_STORAGE_ACCOUNT_NAME = os.getenv("AZURE_STORAGE_ACCOUNT_NAME")
+AZURE_STORAGE_ACCOUNT_KEY = os.getenv("AZURE_STORAGE_ACCOUNT_KEY")
+
+def parse_cloud_uri(uri: str) -> Tuple[str, str, str]:
+    """
+    Parse cloud storage URI and return (provider, bucket/container, path).
+    Supports: gs://bucket/path, s3://bucket/path, azure://container/path
+    """
+    if uri.startswith("gs://"):
+        parts = uri.replace("gs://", "").split("/", 1)
+        return "gcs", parts[0], parts[1] if len(parts) > 1 else ""
+    elif uri.startswith("s3://"):
+        parts = uri.replace("s3://", "").split("/", 1)
+        return "s3", parts[0], parts[1] if len(parts) > 1 else ""
+    elif uri.startswith("azure://"):
+        parts = uri.replace("azure://", "").split("/", 1)
+        return "azure", parts[0], parts[1] if len(parts) > 1 else ""
+    else:
+        # If no scheme, raise error
+        raise ValueError(f"Invalid cloud storage URI: {uri}")
+
+def get_gcs_client():
     """Create and return a GCS client using service account credentials."""
     try:
         if GCP_SERVICE_ACCOUNT_KEY is None:
@@ -70,6 +114,225 @@ def get_storage_client():
         logger.error(f"Error authenticating with GCP: {e}")
         return None
 
+def get_s3_client():
+    """Create and return an S3 client using AWS credentials."""
+    if not AWS_AVAILABLE:
+        logger.error("boto3 not installed. Install with: pip install boto3")
+        return None
+    
+    try:
+        if AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY:
+            client = boto3.client(
+                's3',
+                aws_access_key_id=AWS_ACCESS_KEY_ID,
+                aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+                region_name=AWS_REGION
+            )
+        else:
+            # Use default credentials (IAM role, environment, etc.)
+            client = boto3.client('s3', region_name=AWS_REGION)
+        
+        logger.info("Successfully authenticated with AWS S3")
+        return client
+    except Exception as e:
+        logger.error(f"Error authenticating with AWS S3: {e}")
+        return None
+
+def get_azure_blob_service_client():
+    """Create and return an Azure Blob Service client."""
+    if not AZURE_AVAILABLE:
+        logger.error("azure-storage-blob not installed. Install with: pip install azure-storage-blob")
+        return None
+    
+    try:
+        if AZURE_STORAGE_CONNECTION_STRING:
+            client = BlobServiceClient.from_connection_string(AZURE_STORAGE_CONNECTION_STRING)
+        elif AZURE_STORAGE_ACCOUNT_NAME and AZURE_STORAGE_ACCOUNT_KEY:
+            account_url = f"https://{AZURE_STORAGE_ACCOUNT_NAME}.blob.core.windows.net"
+            client = BlobServiceClient(account_url=account_url, credential=AZURE_STORAGE_ACCOUNT_KEY)
+        else:
+            logger.error("Azure credentials not configured")
+            return None
+        
+        logger.info("Successfully authenticated with Azure Blob Storage")
+        return client
+    except Exception as e:
+        logger.error(f"Error authenticating with Azure Blob Storage: {e}")
+        return None
+
+def list_objects_unified(provider: str, bucket_or_container: str) -> List[Dict[str, Any]]:
+    """List objects from any cloud provider."""
+    objects = []
+    
+    if provider == "gcs":
+        storage_client = get_gcs_client()
+        if not storage_client:
+            raise Exception("Could not authenticate with GCP")
+        
+        bucket = storage_client.bucket(bucket_or_container)
+        blobs = bucket.list_blobs()
+        
+        for blob in blobs:
+            objects.append({
+                "name": blob.name,
+                "size": blob.size,
+                "content_type": blob.content_type,
+                "created": blob.time_created.isoformat() if blob.time_created else None,
+                "updated": blob.updated.isoformat() if blob.updated else None,
+                "storage_class": blob.storage_class,
+                "public_url": blob.public_url
+            })
+    
+    elif provider == "s3":
+        s3_client = get_s3_client()
+        if not s3_client:
+            raise Exception("Could not authenticate with AWS S3")
+        
+        paginator = s3_client.get_paginator('list_objects_v2')
+        for page in paginator.paginate(Bucket=bucket_or_container):
+            for obj in page.get('Contents', []):
+                objects.append({
+                    "name": obj['Key'],
+                    "size": obj['Size'],
+                    "content_type": None,
+                    "created": obj['LastModified'].isoformat() if 'LastModified' in obj else None,
+                    "updated": obj['LastModified'].isoformat() if 'LastModified' in obj else None,
+                    "storage_class": obj.get('StorageClass'),
+                    "public_url": f"s3://{bucket_or_container}/{obj['Key']}"
+                })
+    
+    elif provider == "azure":
+        azure_client = get_azure_blob_service_client()
+        if not azure_client:
+            raise Exception("Could not authenticate with Azure Blob Storage")
+        
+        container_client = azure_client.get_container_client(bucket_or_container)
+        blobs = container_client.list_blobs()
+        
+        for blob in blobs:
+            objects.append({
+                "name": blob.name,
+                "size": blob.size,
+                "content_type": blob.content_settings.content_type if blob.content_settings else None,
+                "created": blob.creation_time.isoformat() if blob.creation_time else None,
+                "updated": blob.last_modified.isoformat() if blob.last_modified else None,
+                "storage_class": blob.blob_tier,
+                "public_url": f"azure://{bucket_or_container}/{blob.name}"
+            })
+    
+    return objects
+
+def copy_object_unified(provider: str, source_bucket: str, source_path: str, 
+                       target_bucket: str, target_path: str) -> bool:
+    """Copy object within the same cloud provider."""
+    if provider == "gcs":
+        storage_client = get_gcs_client()
+        if not storage_client:
+            raise Exception("Could not authenticate with GCP")
+        
+        source_bucket_obj = storage_client.bucket(source_bucket)
+        source_blob = source_bucket_obj.blob(source_path)
+        
+        if not source_blob.exists():
+            raise Exception(f"Source file does not exist: gs://{source_bucket}/{source_path}")
+        
+        target_bucket_obj = storage_client.bucket(target_bucket)
+        source_bucket_obj.copy_blob(source_blob, target_bucket_obj, target_path)
+        return True
+    
+    elif provider == "s3":
+        s3_client = get_s3_client()
+        if not s3_client:
+            raise Exception("Could not authenticate with AWS S3")
+        
+        copy_source = {'Bucket': source_bucket, 'Key': source_path}
+        s3_client.copy_object(CopySource=copy_source, Bucket=target_bucket, Key=target_path)
+        return True
+    
+    elif provider == "azure":
+        azure_client = get_azure_blob_service_client()
+        if not azure_client:
+            raise Exception("Could not authenticate with Azure Blob Storage")
+        
+        source_blob_client = azure_client.get_blob_client(container=source_bucket, blob=source_path)
+        target_blob_client = azure_client.get_blob_client(container=target_bucket, blob=target_path)
+        
+        if not source_blob_client.exists():
+            raise Exception(f"Source file does not exist: azure://{source_bucket}/{source_path}")
+        
+        target_blob_client.start_copy_from_url(source_blob_client.url)
+        return True
+    
+    return False
+
+def delete_object_unified(provider: str, bucket_or_container: str, path: str) -> bool:
+    """Delete object from any cloud provider."""
+    if provider == "gcs":
+        storage_client = get_storage_client()
+        if not storage_client:
+            raise Exception("Could not authenticate with GCP")
+        
+        bucket = storage_client.bucket(bucket_or_container)
+        blob = bucket.blob(path)
+        blob.delete()
+        return True
+    
+    elif provider == "s3":
+        s3_client = get_s3_client()
+        if not s3_client:
+            raise Exception("Could not authenticate with AWS S3")
+        
+        s3_client.delete_object(Bucket=bucket_or_container, Key=path)
+        return True
+    
+    elif provider == "azure":
+        azure_client = get_azure_blob_service_client()
+        if not azure_client:
+            raise Exception("Could not authenticate with Azure Blob Storage")
+        
+        blob_client = azure_client.get_blob_client(container=bucket_or_container, blob=path)
+        blob_client.delete_blob()
+        return True
+    
+    return False
+
+def download_text_unified(provider: str, bucket_or_container: str, path: str) -> str:
+    """Download text content from any cloud provider."""
+    if provider == "gcs":
+        storage_client = get_storage_client()
+        if not storage_client:
+            raise Exception("Could not authenticate with GCP")
+        
+        bucket = storage_client.bucket(bucket_or_container)
+        blob = bucket.blob(path)
+        
+        if not blob.exists():
+            raise Exception(f"File does not exist: gs://{bucket_or_container}/{path}")
+        
+        return blob.download_as_text()
+    
+    elif provider == "s3":
+        s3_client = get_s3_client()
+        if not s3_client:
+            raise Exception("Could not authenticate with AWS S3")
+        
+        response = s3_client.get_object(Bucket=bucket_or_container, Key=path)
+        return response['Body'].read().decode('utf-8')
+    
+    elif provider == "azure":
+        azure_client = get_azure_blob_service_client()
+        if not azure_client:
+            raise Exception("Could not authenticate with Azure Blob Storage")
+        
+        blob_client = azure_client.get_blob_client(container=bucket_or_container, blob=path)
+        
+        if not blob_client.exists():
+            raise Exception(f"File does not exist: azure://{bucket_or_container}/{path}")
+        
+        return blob_client.download_blob().readall().decode('utf-8')
+    
+    raise Exception(f"Unsupported provider: {provider}")
+
 # Create FastMCP app with auth
 verifier = None
 JWKS_URI = os.getenv("JWKS_URI")
@@ -88,43 +351,37 @@ except Exception as e:
 mcp = FastMCP("CloudStorage", auth=verifier)
 
 @mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True})
-def get_objects() -> str:
-    """Get all objects from a GCS bucket."""
-    logger.debug(f"Getting objects from bucket '{DEFAULT_BUCKET}'")
-
+def get_objects(bucket_uri: Optional[str] = None) -> str:
+    """Get all objects from a cloud storage bucket/container."""
     # Get access token for authentication
     access_token: AccessToken | None = get_access_token()
     if access_token:
         logger.debug(f"Request authenticated with token scopes: {access_token.claims.get('scope', '')}")
     
-    # Get storage client
-    storage_client = get_storage_client()
-    if storage_client is None:
-        return json.dumps({"error": "Could not authenticate with GCP. Check GCP_SERVICE_ACCOUNT_KEY"})
-    
     try:
-        bucket = storage_client.bucket(DEFAULT_BUCKET)
-        blobs = bucket.list_blobs()
+        # Parse URI to determine provider and bucket
+        if bucket_uri:
+            provider, bucket_name, _ = parse_cloud_uri(bucket_uri)
+        else:
+            provider = "gcs"
+            bucket_name = BUCKET_NAME
+            if not bucket_name:
+                return json.dumps({"error": "No bucket specified and BUCKET_NAME not set"})
         
-        objects = []
-        for blob in blobs:
-            objects.append({
-                "name": blob.name,
-                "size": blob.size,
-                "content_type": blob.content_type,
-                "created": blob.time_created.isoformat() if blob.time_created else None,
-                "updated": blob.updated.isoformat() if blob.updated else None,
-                "generation": blob.generation,
-                "metageneration": blob.metageneration,
-                "storage_class": blob.storage_class,
-                "public_url": blob.public_url
-            })
+        logger.debug(f"Getting objects from {provider} bucket '{bucket_name}'")
         
-        logger.debug(f"Successfully retrieved {len(objects)} objects from bucket '{bucket_name}'")
-        return json.dumps({"bucket": bucket_name, "object_count": len(objects), "objects": objects})
+        objects = list_objects_unified(provider, bucket_name)
+        
+        logger.debug(f"Successfully retrieved {len(objects)} objects from {provider} bucket '{bucket_name}'")
+        return json.dumps({
+            "provider": provider,
+            "bucket": bucket_name,
+            "object_count": len(objects),
+            "objects": objects
+        })
     
     except Exception as e:
-        logger.error(f"Error listing objects from bucket '{bucket_name}': {e}")
+        logger.error(f"Error listing objects: {e}")
         return json.dumps({"error": f"Failed to list objects: {str(e)}"})
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False})
@@ -133,9 +390,9 @@ def perform_action(file_uri: str, action: str, target_uri: str) -> str:
     Performs the configured action (move or copy) between cloud storage locations.
     
     Args:
-        file_uri: Source GCS file path (e.g., 'path/to/file.txt')
+        file_uri: Source file URI (e.g., 'gs://bucket/path/file.txt')
         action: Action to perform - either 'move' or 'copy'
-        target_uri: Target GCS folder path (e.g., 'folder/'). Must end with '/' to indicate it's a folder.
+        target_uri: Target folder URI (e.g., 'gs://bucket/folder/'). Must end with '/' for folder.
     """
     logger.debug(f"Performing action '{action}' from '{file_uri}' to '{target_uri}'")
     
@@ -152,58 +409,41 @@ def perform_action(file_uri: str, action: str, target_uri: str) -> str:
     if not target_uri.endswith("/"):
         return json.dumps({"error": f"Target URI must be a folder path ending with '/': {target_uri}"})
     
-    # Get storage client
-    storage_client = get_storage_client()
-    if storage_client is None:
-        return json.dumps({"error": "Could not authenticate with GCP. Check GCP_SERVICE_ACCOUNT_KEY"})
-    
     try:
-        if DEFAULT_BUCKET is None:
-            return json.dumps({"error": "No bucket specified in file_uri and DEFAULT_BUCKET env var not set"})
-        source_bucket_name = DEFAULT_BUCKET
-        source_blob_name = file_uri
-
-        target_bucket_name = DEFAULT_BUCKET
-        target_folder_path = target_uri
+        # Parse source and target URIs
+        source_provider, source_bucket, source_path = parse_cloud_uri(file_uri)
+        target_provider, target_bucket, target_folder = parse_cloud_uri(target_uri)
+        
+        # Ensure providers match
+        if source_provider != target_provider:
+            return json.dumps({"error": f"Cross-provider operations not supported. Source is {source_provider}, target is {target_provider}"})
         
         # Extract filename from source path
-        filename = os.path.basename(source_blob_name)
+        filename = os.path.basename(source_path)
         
         # Construct full target blob path (folder + filename)
-        target_blob_name = os.path.join(target_folder_path, filename).replace("\\", "/")
-        
-        # Get source bucket and blob
-        source_bucket = storage_client.bucket(DEFAULT_BUCKET)
-        source_blob = source_bucket.blob(source_blob_name)
-        
-        # Check if source blob exists
-        if not source_blob.exists():
-            return json.dumps({"error": f"Source file does not exist: {file_uri}"})
-        
-        # Get target bucket
-        target_bucket = storage_client.bucket(DEFAULT_BUCKET)
+        target_path = os.path.join(target_folder, filename).replace("\\", "/")
         
         # Construct full URIs for response
-        full_source_uri = f"gs://{source_bucket_name}/{source_blob_name}"
-        full_target_uri = f"gs://{target_bucket_name}/{target_blob_name}"
+        full_source_uri = f"{source_provider}://{source_bucket}/{source_path}"
+        full_target_uri = f"{target_provider}://{target_bucket}/{target_path}"
         
         # Perform copy operation
-        target_blob = source_bucket.copy_blob(
-            source_blob, target_bucket, target_blob_name
-        )
+        copy_object_unified(source_provider, source_bucket, source_path, target_bucket, target_path)
         
         result = {
             "action": action,
+            "provider": source_provider,
             "source": full_source_uri,
             "target": full_target_uri,
-            "target_folder": f"gs://{target_bucket_name}/{target_folder_path}",
+            "target_folder": f"{target_provider}://{target_bucket}/{target_folder}",
             "filename": filename,
             "status": "success"
         }
         
-        # If action is move, delete the source blob
+        # If action is move, delete the source
         if action == "move":
-            source_blob.delete()
+            delete_object_unified(source_provider, source_bucket, source_path)
             logger.debug(f"Successfully moved '{full_source_uri}' to '{full_target_uri}'")
             result["message"] = f"File moved from {full_source_uri} to {full_target_uri}"
         else:
@@ -215,131 +455,3 @@ def perform_action(file_uri: str, action: str, target_uri: str) -> str:
     except Exception as e:
         logger.error(f"Error performing {action} operation: {e}")
         return json.dumps({"error": f"Failed to {action} file: {str(e)}"})
-
-@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True})
-def load_rules(config_uri: str) -> str:
-    """Fetches and parses the YAML configuration from a cloud location or local file path."""
-    logger.debug(f"Loading rules from config URI '{config_uri}'")
-    
-    # Get access token for authentication
-    access_token: AccessToken | None = get_access_token()
-    if access_token:
-        logger.debug(f"Request authenticated with token scopes: {access_token.claims.get('scope', '')}")
-    
-    try:
-        yaml_content = None
-        
-        # Check if it's a GCS URI
-        if config_uri.startswith("gs://"):
-            # Get storage client for GCS
-            storage_client = get_storage_client()
-            if storage_client is None:
-                return json.dumps({"error": "Could not authenticate with GCP. Check GCP_SERVICE_ACCOUNT_KEY"})
-            
-            # Parse bucket and blob path
-            uri_parts = config_uri.replace("gs://", "").split("/", 1)
-            if len(uri_parts) != 2:
-                return json.dumps({"error": f"Invalid GCS URI format: {config_uri}"})
-            bucket_name, blob_name = uri_parts
-            
-            # Fetch the file from GCS
-            bucket = storage_client.bucket(bucket_name)
-            blob = bucket.blob(blob_name)
-            
-            if not blob.exists():
-                return json.dumps({"error": f"Config file does not exist: {config_uri}"})
-            
-            yaml_content = blob.download_as_text()
-            logger.debug(f"Successfully downloaded config from GCS: {config_uri}")
-        
-        else:
-            # Treat as local file path
-            # Support relative paths from the script directory
-            if not os.path.isabs(config_uri):
-                script_dir = os.path.dirname(os.path.abspath(__file__))
-                config_path = os.path.join(script_dir, config_uri)
-            else:
-                config_path = config_uri
-            
-            if not os.path.exists(config_path):
-                return json.dumps({"error": f"Config file does not exist: {config_path}"})
-            
-            with open(config_path, 'r') as file:
-                yaml_content = file.read()
-            logger.debug(f"Successfully loaded config from local file: {config_path}")
-        
-        # Parse YAML content
-        config = yaml.safe_load(yaml_content)
-        
-        # Validate the config structure
-        if not isinstance(config, dict) or "rules" not in config:
-            return json.dumps({"error": "Invalid config format. Expected 'rules' key at root level"})
-        
-        rules = config.get("rules", [])
-        if not isinstance(rules, list):
-            return json.dumps({"error": "Invalid config format. 'rules' must be a list"})
-        
-        # Validate each rule has required fields
-        for i, rule in enumerate(rules):
-            required_fields = ["pattern", "target", "action"]
-            missing_fields = [field for field in required_fields if field not in rule]
-            if missing_fields:
-                return json.dumps({
-                    "error": f"Rule {i} is missing required fields: {missing_fields}"
-                })
-            
-            if rule["action"] not in ["move", "copy"]:
-                return json.dumps({
-                    "error": f"Rule {i} has invalid action '{rule['action']}'. Must be 'move' or 'copy'"
-                })
-        
-        # Sort rules by priority (higher priority first)
-        sorted_rules = sorted(rules, key=lambda x: x.get("priority", 0), reverse=True)
-        
-        result = {
-            "status": "success",
-            "source": config_uri,
-            "rule_count": len(sorted_rules),
-            "rules": sorted_rules
-        }
-        
-        logger.debug(f"Successfully loaded and parsed {len(sorted_rules)} rules")
-        return json.dumps(result)
-    
-    except yaml.YAMLError as e:
-        logger.error(f"Error parsing YAML config: {e}")
-        return json.dumps({"error": f"Failed to parse YAML config: {str(e)}"})
-    except Exception as e:
-        logger.error(f"Error loading rules from '{config_uri}': {e}")
-        return json.dumps({"error": f"Failed to load rules: {str(e)}"})
-
-# host can be specified with HOST env variable
-# transport can be specified with MCP_TRANSPORT env variable (defaults to streamable-http)
-def run_server():
-    "Run the MCP server"
-    transport = os.getenv("MCP_TRANSPORT", "streamable-http")
-    host = os.getenv("HOST", "0.0.0.0")
-    port = int(os.getenv("PORT", "8000"))
-    logger.info(f"Starting Cloud Storage MCP Server on {host}:{port} with transport '{transport}'")
-    mcp.run(transport=transport, host=host, port=port)
-
-if __name__ == "__main__":
-    if GCP_SERVICE_ACCOUNT_KEY is None:
-        logger.warning("Please configure the GCP_SERVICE_ACCOUNT_KEY environment variable before running the server")
-    else:
-        logger.info("Configured GCP_SERVICE_ACCOUNT_KEY environment variable")
-        
-        if DEFAULT_BUCKET is None:
-            logger.warning("DEFAULT_BUCKET environment variable not set - bucket must be specified in URIs")
-        else:
-            logger.info(f"Using DEFAULT_BUCKET: {DEFAULT_BUCKET}")
-        
-        # Check if JWT auth is configured
-        if JWKS_URI is None:
-            logger.info("No JWKS_URI configured; JWT validation disabled")
-            logger.info("Starting Cloud Storage MCP Server")
-            run_server()
-        else:
-            logger.info(f"JWT validation enabled with JWKS_URI: {JWKS_URI}")
-            logger.info("Starting Cloud Storage MCP Server")
-            run_server()
