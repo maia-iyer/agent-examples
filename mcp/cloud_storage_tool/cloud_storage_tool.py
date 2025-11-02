@@ -12,22 +12,10 @@ from fastmcp.server.dependencies import get_access_token, AccessToken
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 from google.cloud import storage
 from google.oauth2 import service_account
-
-# AWS S3 imports
-try:
-    import boto3
-    from botocore.exceptions import ClientError, NoCredentialsError
-    AWS_AVAILABLE = True
-except ImportError:
-    AWS_AVAILABLE = False
-
-# Azure Blob Storage imports
-try:
-    from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
-    from azure.core.exceptions import ResourceNotFoundError, AzureError
-    AZURE_AVAILABLE = True
-except ImportError:
-    AZURE_AVAILABLE = False
+import boto3
+from botocore.exceptions import ClientError, NoCredentialsError
+from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
+from azure.core.exceptions import ResourceNotFoundError, AzureError
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), stream=sys.stdout, format='%(levelname)s: %(message)s')
@@ -116,10 +104,6 @@ def get_gcs_client():
 
 def get_s3_client():
     """Create and return an S3 client using AWS credentials."""
-    if not AWS_AVAILABLE:
-        logger.error("boto3 not installed. Install with: pip install boto3")
-        return None
-    
     try:
         if AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY:
             client = boto3.client(
@@ -140,10 +124,6 @@ def get_s3_client():
 
 def get_azure_blob_service_client():
     """Create and return an Azure Blob Service client."""
-    if not AZURE_AVAILABLE:
-        logger.error("azure-storage-blob not installed. Install with: pip install azure-storage-blob")
-        return None
-    
     try:
         if AZURE_STORAGE_CONNECTION_STRING:
             client = BlobServiceClient.from_connection_string(AZURE_STORAGE_CONNECTION_STRING)
