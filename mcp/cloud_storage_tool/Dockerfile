@@ -11,4 +11,4 @@ ENV PRODUCTION_MODE=True \
 RUN chown -R 1001:1001 /app
 USER 1001
 
-CMD ["uv", "run", "--no-sync", "weather_tool.py"]
+CMD ["uv", "run", "--no-sync", "cloud_storage_tool.py"]
