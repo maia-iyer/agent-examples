@@ -4,7 +4,7 @@ import json
 import logging
 import os
 import sys
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 from datetime import date, datetime
 
 from fastmcp import FastMCP
@@ -13,9 +13,7 @@ from fast_flights import (
     Passengers,
     Result,
     get_flights,
-    search_airport as ff_search_airport,
-    Airport,
-)
+    search_airport as ff_search_airport)
 
 
 mcp = FastMCP("Flights")
@@ -143,14 +141,14 @@ def search_flights(
     Optional parameters:
     - return_date: YYYY-MM-DD (for round-trip flights)
     - cabin: economy|premium-economy|business|first (defaults to economy)
-    - adults: an interger number of adult passengers (defaults to 1)
+    - adults: an integer number of adult passengers (defaults to 1)
     - children: an integer number of child passengers (defaults to 0)
     - infants_in_seat: an integer number of infants with seats (defaults to 0)
-    - infants_on_lap: an interger number of infants on lap (defaults to 0)
+    - infants_on_lap: an integer number of infants on lap (defaults to 0)
     - airlines: comma-separated IATA codes or alliances (SKYTEAM, STAR_ALLIANCE, ONEWORLD)
     - max_stops: an integer, maximum number of stops (defaults to no limit)
     """
-    # Coerce passenger counts to integers (accept numeric strings) - necessary due to an fastMCP issue
+    # Coerce passenger counts to integers, necessary due to a fastMCP issue
     adults, err = _coerce_int(adults, "adults", 1)
     if err:
         return json.dumps({"error": err, "adults": adults})
@@ -271,7 +269,7 @@ def search_flights(
         passengers=passengers,
         fetch_mode="fallback"
     )
-    except:
+    except Exception:
         return json.dumps({
             "error": "An error occurred while fetching flight data, there may be no available flights for the given parameters.",
             "request": {
