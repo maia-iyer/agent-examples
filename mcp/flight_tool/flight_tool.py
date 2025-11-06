@@ -303,8 +303,7 @@ def search_flights(
             "max_stops": max_stops,
         },
         "count": len(summary),
-        "summary": summary,
-        "raw": summary,
+        "summary": summary
     })
 
 
