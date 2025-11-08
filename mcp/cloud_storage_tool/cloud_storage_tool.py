@@ -1,14 +1,9 @@
-"Cloud Storage MCP tool example"
-
 import json
 import logging
 import os
 import sys
-import jwt
 from typing import List, Dict, Any, Tuple
 from fastmcp import FastMCP
-from fastmcp.server.dependencies import get_access_token, AccessToken
-from fastmcp.server.auth.providers.jwt import JWTVerifier
 from google.cloud import storage
 from google.oauth2 import service_account
 import boto3
@@ -17,31 +12,6 @@ from azure.storage.blob import BlobServiceClient
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), stream=sys.stdout, format='%(levelname)s: %(message)s')
 
-def get_client_id() -> str:
-    """
-    Read the SVID JWT from file and extract the client ID from the "sub" claim.
-    """
-    jwt_file_path = "/opt/jwt_svid.token"
-    
-    content = None
-    try:
-        with open(jwt_file_path, "r") as file:
-            content = file.read()
-    except FileNotFoundError:
-        raise Exception(f"SVID JWT file {jwt_file_path} not found.")
-
-    if content is None or content.strip() == "":
-        raise Exception(f"No content in SVID JWT file {jwt_file_path}.")
-
-    try:
-        decoded = jwt.decode(content, options={"verify_signature": False})
-    except jwt.DecodeError:
-        raise ValueError(f"Failed to decode SVID JWT file {jwt_file_path}.")
-
-    try:
-        return decoded["sub"]
-    except KeyError:
-        raise KeyError('SVID JWT is missing required "sub" claim.')
 
 # GCP credentials
 GCP_SERVICE_ACCOUNT_KEY = os.getenv("GCP_SERVICE_ACCOUNT_KEY")
@@ -306,31 +276,13 @@ def download_text_unified(provider: str, bucket_or_container: str, path: str) ->
     
     raise Exception(f"Unsupported provider: {provider}")
 
-# Create FastMCP app with auth
-verifier = None
-JWKS_URI = os.getenv("JWKS_URI")
-ISSUER = os.getenv("ISSUER")
-try:
-    CLIENT_ID = get_client_id()
-    if JWKS_URI is not None:
-        verifier = JWTVerifier(
-            jwks_uri=JWKS_URI,
-            issuer=ISSUER,
-            audience=CLIENT_ID
-        )
-except Exception as e:
-    logger.warning(f"Could not set up JWT verification: {e}")
-
-mcp = FastMCP("CloudStorage", auth=verifier)
+# Create FastMCP app
+mcp = FastMCP("CloudStorage")
 
 @mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True})
 def get_objects(bucket_uri: str) -> str:
     """Get all objects from a cloud storage bucket/container."""
     # Get access token for authentication
-    access_token: AccessToken | None = get_access_token()
-    if access_token:
-        logger.debug(f"Request authenticated with token scopes: {access_token.claims.get('scope', '')}")
-    
     try:
         # Parse URI to determine provider and bucket
         provider, bucket_name, _ = parse_cloud_uri(bucket_uri)
@@ -362,12 +314,7 @@ def perform_action(file_uri: str, action: str, target_uri: str) -> str:
         target_uri: Target folder URI (e.g., 'gs://bucket/folder/'). Must end with '/' for folder.
     """
     logger.debug(f"Performing action '{action}' from '{file_uri}' to '{target_uri}'")
-    
-    # Get access token for authentication
-    access_token: AccessToken | None = get_access_token()
-    if access_token:
-        logger.debug(f"Request authenticated with token scopes: {access_token.claims.get('scope', '')}")
-    
+
     # Validate action
     if action not in ["move", "copy"]:
         return json.dumps({"error": f"Invalid action '{action}'. Must be 'move' or 'copy'"})
@@ -422,3 +369,25 @@ def perform_action(file_uri: str, action: str, target_uri: str) -> str:
     except Exception as e:
         logger.error(f"Error performing {action} operation: {e}")
         return json.dumps({"error": f"Failed to {action} file: {str(e)}"})
+
+def run_server():
+    transport = os.getenv("MCP_TRANSPORT", "streamable-http")
+    host = os.getenv("HOST", "0.0.0.0")
+    port = int(os.getenv("PORT", "8000"))
+    mcp.run(transport=transport, host=host, port=port)
+
+if __name__ == "__main__":
+    configured_providers = []
+    if GCP_SERVICE_ACCOUNT_KEY and GCP_PROJECT_ID:
+        configured_providers.append("GCP")
+    if AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY:
+        configured_providers.append("AWS S3")
+    if AZURE_STORAGE_CONNECTION_STRING or (AZURE_STORAGE_ACCOUNT_NAME and AZURE_STORAGE_ACCOUNT_KEY):
+        configured_providers.append("Azure")
+    
+    if not configured_providers:
+        logger.warning("No cloud provider credentials configured. Please set up at least one provider.")
+    else:
+        logger.info(f"Configured providers: {', '.join(configured_providers)}")
+    
+    run_server()
