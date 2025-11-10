@@ -1,6 +1,6 @@
 # Flight MCP tool
 
-This MCP server exposes tools for searching flights via fast-flights, a python library for accessing Google Flights data
+This MCP server exposes tools for searching flights via fast-flights, a Python library for accessing Google Flights data
 
 ## Tools
 - `search_flights(from_airport, to_airport, departure_date, return_date?, cabin?, adults?, children?, infants_in_seat?, infants_on_lap?, currency?, airlines?, max_stops?)` - wrapper around fast-flights flight search API. Returns flights that fit the given parameter.
