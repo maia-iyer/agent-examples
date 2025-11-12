@@ -282,16 +282,27 @@ mcp = FastMCP("CloudStorage")
 @mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True})
 def get_objects(bucket_uri: str) -> str:
     """Get all objects from a cloud storage bucket/container."""
-    # Get access token for authentication
     try:
         # Parse URI to determine provider and bucket
         provider, bucket_name, _ = parse_cloud_uri(bucket_uri)
         
         logger.debug(f"Getting objects from {provider} bucket '{bucket_name}'")
         
+        # Get the raw list of objects
         objects = list_objects_unified(provider, bucket_name)
         
-        logger.debug(f"Successfully retrieved {len(objects)} objects from {provider} bucket '{bucket_name}'")
+        # Loop through and enrich each object with the full file_uri
+        for obj in objects:
+            # This assumes your list_objects_unified returns dicts
+            # and that the object key is stored in the 'name' field.
+            # Adjust 'name' if your key is stored differently (e.g., 'key')
+            if 'name' in obj:
+                obj['file_uri'] = f"{provider}://{bucket_name}/{obj['name']}"
+            else:
+                logger.warning(f"Object {obj} missing 'name' key, cannot construct file_uri")
+
+        logger.debug(f"Successfully retrieved and processed {len(objects)} objects from {provider} bucket '{bucket_name}'")
+        
         return json.dumps({
             "provider": provider,
             "bucket": bucket_name,
