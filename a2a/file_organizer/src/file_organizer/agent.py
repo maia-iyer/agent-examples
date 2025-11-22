@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 LangChainInstrumentor().instrument()
 
 def get_agent_card(host: str, port: int):
-    """Returns the Agent Card for the AG2 Agent."""
+    """Returns the Agent Card for the A2A Agent."""
     capabilities = AgentCapabilities(streaming=True)
     skill = AgentSkill(
         id="file_organizer",
@@ -109,7 +109,6 @@ class FileOrganizerExecutor(AgentExecutor):
         logger.info(f'Processing messages: {input_data}')
 
         try:
-            output = None
             # Test MCP connection first
             logger.info(f'Attempting to connect to MCP server at: {os.getenv("MCP_URL", "http://localhost:8000/sse")}')
 

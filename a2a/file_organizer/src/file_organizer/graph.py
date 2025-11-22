@@ -1,7 +1,7 @@
 import os
 from langgraph.graph import StateGraph, MessagesState, START
 from langchain_mcp_adapters.client import MultiServerMCPClient
-from langchain_core.messages import SystemMessage,  AIMessage
+from langchain_core.messages import SystemMessage, AIMessage
 from langgraph.prebuilt import tools_condition, ToolNode
 from langchain_openai import ChatOpenAI
 
@@ -11,10 +11,9 @@ config = Configuration()
 
 # Extend MessagesState to include a final answer
 class ExtendedMessagesState(MessagesState):
-     final_answer: str = ""
+    final_answer: str = ""
 
 def get_mcpclient():
-    
     return MultiServerMCPClient({
         "cloud_storage": {
             "url": os.getenv("MCP_URL", "http://cloud-storage-tool:8000/mcp"),
@@ -41,15 +40,16 @@ async def get_graph(client) -> StateGraph:
 
 {bucket_info}
 
-Your workflow:
-1. Discover what tools are available to you by examining your tool list
-2. List or discover files in the bucket using the appropriate tool
-3. Analyze each file and decide how to organize it based on:
-   - File extension and type (e.g., .pdf, .jpg, .txt)
-   - Filename patterns or naming conventions
-   - Logical grouping (similar file types together)
-4. Use the appropriate tool to MOVE or COPY each file to its organized location
-5. Provide a summary of what you did
+Tool output schema:
+- get_objects -> {{"provider": str, "bucket": str, "objects": [{{"name": str, "path": str, "file_uri": str, "size_bytes": int|None}}]}}
+- perform_action -> {{"status": "success", "action": "move|copy", "source_uri": str, "target_uri": str, "target_folder_uri": str, "filename": str, "message": str}}
+
+Guidelines:
+1. Always call get_objects (or ask the user for the bucket) before assuming any files exist.
+2. Only reference files that appear in tool results or explicit user input.
+3. Derive organization rules from extensions, folders, or user instructions; ask clarifying questions if uncertain.
+4. When moving/copying, explicitly describe which files are affected and why.
+5. Provide a concise final summary listing the actions performed and remaining follow-ups.
 """)
 
     # Node
