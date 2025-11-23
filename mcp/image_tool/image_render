@@ -1,0 +1,17 @@
+import json
+import base64
+import pathlib
+import subprocess
+import sys
+
+IN = pathlib.Path("mcp/image_tool/resp.json") 
+OUT_DIR = pathlib.Path("mcp/image_tool")
+
+outer = json.loads(IN.read_text(encoding="utf-8"))
+data = json.loads(outer["result"])
+b64 = data.get("image_base64")
+out_path = OUT_DIR / f"output_image.jpg"
+out_path.write_bytes(base64.b64decode(b64))
+print("Wrote", out_path)
+
+subprocess.run(["open", str(out_path)])
