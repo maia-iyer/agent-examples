@@ -367,10 +367,8 @@ def perform_action(file_uri: str, action: str, target_uri: str) -> str:
         if action == "move":
             delete_object_unified(source_provider, source_bucket, source_path)
             logger.debug(f"Successfully moved '{full_source_uri}' to '{full_target_uri}'")
-            result["message"] = f"File moved from {full_source_uri} to {full_target_uri}"
         else:
             logger.debug(f"Successfully copied '{full_source_uri}' to '{full_target_uri}'")
-            result["message"] = f"File copied from {full_source_uri} to {full_target_uri}"
         
         return json.dumps(result)
     
