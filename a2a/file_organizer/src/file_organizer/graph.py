@@ -36,16 +36,38 @@ async def get_graph(client) -> StateGraph:
 
     bucket_info = f"Target bucket: {bucket_uri}" if bucket_uri else "No bucket URI configured. Ask the user to specify which bucket to organize."
 
-    sys_msg = SystemMessage(content=f"""You are a file organization assistant for cloud storage buckets.
+    sys_msg = SystemMessage(content=(
+    "You are a file-organization agent that must use tools faithfully.\n\n"
+    "The following are the authoritative tool schemas you MUST obey exactly:\n\n"
+    f"{bucket_info}\n"
+    "TOOL: get_objects\n"
+    "INPUT:\n"
+    "  {\n"
+    "    \"bucket_uri\": \"string\"\n"
+    "  }\n\n"
+    "TOOL: perform_action\n"
+    "INPUT:\n"
+    "  {\n"
+    "    \"file_uri\": \"string\",\n"
+    "    \"action\": \"move\" | \"copy\",\n"
+    "    \"target_uri\": \"string\"\n"
+    "  }\n\n"
+    "RULES:\n"
+    "1. You MUST NOT include any fields other than those defined above.\n"
+    "   Forbidden fields include: source_uri, target_folder_uri, status,\n"
+    "   filename, message, or any other keys not listed in the schema.\n\n"
+    "2. When organizing files:\n"
+    "   - ALWAYS begin by calling get_objects.\n"
+    "   - Then produce one perform_action call per file that needs moving.\n"
+    "   - target_uri must represent a folder and end with '/'.\n"
+    "   - file_uri must be the exact file_uri from get_objects output.\n\n"
+    "3. NEVER wrap tool calls in narrative text.\n"
+    "   A tool call MUST be the only content in the assistant's message.\n\n"
+    "4. NEVER ask the user questions unless the user explicitly requests an explanation.\n\n"
+    "5. NEVER summarize files before or after tools. Tool calls must happen immediately.\n\n"
+    "6. After all perform_action calls have run, you may provide a brief summary as plain text.\n"
+))
 
-{bucket_info}
-Guidelines:
-1. Always call get_objects (or ask the user for the bucket) before assuming any files exist.
-2. Only reference files that appear in tool results or explicit user input.
-3. Derive organization rules from extensions, folders, or user instructions; ask clarifying questions if uncertain.
-4. When moving/copying, explicitly describe which files are affected and why.
-5. Provide a concise final summary listing the actions performed and remaining follow-ups.
-""")
 
     # Node
     def assistant(state: ExtendedMessagesState) -> ExtendedMessagesState:
