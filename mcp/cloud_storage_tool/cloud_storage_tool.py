@@ -283,26 +283,35 @@ mcp = FastMCP("CloudStorage")
 def get_objects(bucket_uri: str) -> str:
     """Get all objects from a cloud storage bucket/container."""
     try:
-        # Parse URI to determine provider and bucket
         provider, bucket_name, _ = parse_cloud_uri(bucket_uri)
         
-        logger.debug(f"Getting objects from {provider} bucket '{bucket_name}'")
+        # Get raw objects
+        raw_objects = list_objects_unified(provider, bucket_name)
         
-        # Get the raw list of objects
-        objects = list_objects_unified(provider, bucket_name)
-        
-        logger.debug(f"Successfully retrieved and processed {len(objects)} objects from {provider} bucket '{bucket_name}'")
+        # FILTER: Create a clean list for the LLM
+        # This reduces token usage and prevents confusion
+        clean_objects = []
+        for obj in raw_objects:
+            # Construct the clean entry using source_uri
+            # Ensure your list_objects_unified actually sets 'source_uri'
+            # OR construct it here if list_objects_unified is hard to change
+            uri = obj.get('source_uri') or obj.get('file_uri') or f"{provider}://{bucket_name}/{obj['name']}"
+            
+            clean_objects.append({
+                "name": obj['name'],
+                "source_uri": uri  # This MUST match the argument in perform_action
+            })
+
+        logger.debug(f"Returning {len(clean_objects)} clean objects to LLM")
         
         return json.dumps({
-            "provider": provider,
             "bucket": bucket_name,
-            "object_count": len(objects),
-            "objects": objects
+            "objects": clean_objects
         })
     
     except Exception as e:
         logger.error(f"Error listing objects: {e}")
-        return json.dumps({"error": f"Failed to list objects: {str(e)}"})
+        return json.dumps({"error": str(e)})
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False})
 def perform_action(source_uri: str, action: str, target_uri: str) -> str:
