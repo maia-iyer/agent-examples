@@ -39,11 +39,6 @@ async def get_graph(client) -> StateGraph:
     sys_msg = SystemMessage(content=f"""You are a file organization assistant for cloud storage buckets.
 
 {bucket_info}
-
-Tool output schema:
-- get_objects -> {{"provider": str, "bucket": str, "objects": [{{"name": str, "path": str, "file_uri": str, "size_bytes": int|None}}]}}
-- perform_action -> {{"status": "success", "action": "move|copy", "source_uri": str, "target_uri": str, "target_folder_uri": str, "filename": str, "message": str}}
-
 Guidelines:
 1. Always call get_objects (or ask the user for the bucket) before assuming any files exist.
 2. Only reference files that appear in tool results or explicit user input.
