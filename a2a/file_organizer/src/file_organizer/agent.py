@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import uvicorn
@@ -118,6 +119,8 @@ class FileOrganizerExecutor(AgentExecutor):
             try:
                 tools = await mcpclient.get_tools()
                 logger.info(f'Successfully connected to MCP server. Available tools: {[tool.name for tool in tools]}')
+                logger.info(json.dumps(await mcpclient.get_tools(), indent=2))
+
             except Exception as tool_error:
                 logger.error(f'Failed to connect to MCP server: {tool_error}')
                 await event_emitter.emit_event(f"Error: Cannot connect to MCP cloud storage at {os.getenv('MCP_URL', 'http://localhost:8000/sse')}. Please ensure the cloud storage MCP server is running. Error: {tool_error}", failed=True)
