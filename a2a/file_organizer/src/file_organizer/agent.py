@@ -119,7 +119,6 @@ class FileOrganizerExecutor(AgentExecutor):
             try:
                 tools = await mcpclient.get_tools()
                 logger.info(f'Successfully connected to MCP server. Available tools: {[tool.name for tool in tools]}')
-                logger.info(json.dumps(await mcpclient.get_tools(), indent=2))
 
             except Exception as tool_error:
                 logger.error(f'Failed to connect to MCP server: {tool_error}')
