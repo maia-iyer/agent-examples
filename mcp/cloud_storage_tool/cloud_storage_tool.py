@@ -141,7 +141,7 @@ def list_objects_unified(provider: str, bucket_or_container: str) -> List[Dict[s
                     "created": obj['LastModified'].isoformat() if 'LastModified' in obj else None,
                     "updated": obj['LastModified'].isoformat() if 'LastModified' in obj else None,
                     "storage_class": obj.get('StorageClass'),
-                    "public_url": f"s3://{bucket_or_container}/{obj['Key']}"
+                    "source_uri": f"s3://{bucket_or_container}/{obj['Key']}",
                 })
     
     elif provider == "azure":
@@ -291,16 +291,6 @@ def get_objects(bucket_uri: str) -> str:
         # Get the raw list of objects
         objects = list_objects_unified(provider, bucket_name)
         
-        # Loop through and enrich each object with the full file_uri
-        for obj in objects:
-            # This assumes your list_objects_unified returns dicts
-            # and that the object key is stored in the 'name' field.
-            # Adjust 'name' if your key is stored differently (e.g., 'key')
-            if 'name' in obj:
-                obj['file_uri'] = f"{provider}://{bucket_name}/{obj['name']}"
-            else:
-                logger.warning(f"Object {obj} missing 'name' key, cannot construct file_uri")
-
         logger.debug(f"Successfully retrieved and processed {len(objects)} objects from {provider} bucket '{bucket_name}'")
         
         return json.dumps({
@@ -315,55 +305,46 @@ def get_objects(bucket_uri: str) -> str:
         return json.dumps({"error": f"Failed to list objects: {str(e)}"})
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False})
-def perform_action(file_uri: str, action: str, target_uri: str) -> str:
+def perform_action(source_uri: str, action: str, target_uri: str) -> str:
     """
     Performs the configured action (move or copy) between cloud storage locations.
     
     Args:
-        file_uri: Source file URI (e.g., 'gs://bucket/path/file.txt')
+        source_uri: The full URI of the file to move/copy (e.g., s3://bucket/path/to/file.txt)
         action: Action to perform - either 'move' or 'copy'
-        target_uri: Target folder URI (e.g., 'gs://bucket/folder/'). Must end with '/' for folder.
+        target_uri: The destination folder URI. Must end with '/' (e.g., s3://bucket/folder/)
     """
-    logger.debug(f"Performing action '{action}' from '{file_uri}' to '{target_uri}'")
+    # Renamed variable in log for consistency
+    logger.debug(f"Performing action '{action}' from '{source_uri}' to '{target_uri}'")
 
-    # Validate action
     if action not in ["move", "copy"]:
         return json.dumps({"error": f"Invalid action '{action}'. Must be 'move' or 'copy'"})
     
-    # Validate target is a folder (ends with /)
     if not target_uri.endswith("/"):
         return json.dumps({"error": f"Target URI must be a folder path ending with '/': {target_uri}"})
     
     try:
-        # Parse source and target URIs
-        source_provider, source_bucket, source_path = parse_cloud_uri(file_uri)
+        # UPDATED: Use source_uri here
+        source_provider, source_bucket, source_path = parse_cloud_uri(source_uri)
         target_provider, target_bucket, target_folder = parse_cloud_uri(target_uri)
         
-        # Ensure providers match
         if source_provider != target_provider:
             return json.dumps({"error": f"Cross-provider operations not supported. Source is {source_provider}, target is {target_provider}"})
         
-        # Extract filename from source path
         filename = os.path.basename(source_path)
-        
-        # Construct full target blob path (folder + filename)
         target_path = os.path.join(target_folder, filename).replace("\\", "/")
         
-        # Construct full URIs for response
         full_source_uri = f"{source_provider}://{source_bucket}/{source_path}"
         full_target_uri = f"{target_provider}://{target_bucket}/{target_path}"
         
-        # Perform copy operation
         copy_object_unified(source_provider, source_bucket, source_path, target_bucket, target_path)
         
         result = {
-            "file_uri": full_source_uri,
+            "source_uri": full_source_uri, # Updated key for consistency
             "action": action,
             "target_uri": full_target_uri
         }
 
-        
-        # If action is move, delete the source
         if action == "move":
             delete_object_unified(source_provider, source_bucket, source_path)
             logger.debug(f"Successfully moved '{full_source_uri}' to '{full_target_uri}'")
