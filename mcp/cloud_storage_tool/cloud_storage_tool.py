@@ -357,14 +357,11 @@ def perform_action(file_uri: str, action: str, target_uri: str) -> str:
         copy_object_unified(source_provider, source_bucket, source_path, target_bucket, target_path)
         
         result = {
+            "file_uri": full_source_uri,
             "action": action,
-            "provider": source_provider,
-            "source": full_source_uri,
-            "target": full_target_uri,
-            "target_folder": f"{target_provider}://{target_bucket}/{target_folder}",
-            "filename": filename,
-            "status": "success"
+            "target_uri": full_target_uri
         }
+
         
         # If action is move, delete the source
         if action == "move":
