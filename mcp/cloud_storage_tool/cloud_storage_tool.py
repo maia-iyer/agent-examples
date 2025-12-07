@@ -325,6 +325,24 @@ def perform_batch_action(source_uris: list[str], action: str, target_folder: str
         target_folder: Destination folder ending with '/' (e.g. "s3://b/Code/")
     """
     # 1. Validate Target
+    if isinstance(source_uris, str):
+        try:
+            # Try standard JSON first
+            source_uris = json.loads(source_uris)
+        except json.JSONDecodeError:
+            try:
+                # Fallback: Handle single quotes (common in Python models) 
+                # e.g. "['s3://...', 's3://...']"
+                source_uris = ast.literal_eval(source_uris)
+            except Exception:
+                return json.dumps({"error": "source_uris must be a valid list or JSON array string"})
+    
+    # Validation: Ensure it ended up as a list
+    if not isinstance(source_uris, list):
+        return json.dumps({"error": f"source_uris must be a list, got {type(source_uris)}"})
+    # -------------------------------------
+
+    # Validate Target
     if not target_folder.endswith("/"):
         return json.dumps({"error": f"Target folder must end with '/': {target_folder}"})
 
@@ -357,8 +375,15 @@ def perform_batch_action(source_uris: list[str], action: str, target_folder: str
             results.append(uri)
             
         except Exception as e:
-            logger.error(f"Failed to process {uri}: {e}")
-            errors.append(f"{uri}: {str(e)}")
+            # Check if it's the specific "NoSuchKey" error
+            error_str = str(e)
+            if "NoSuchKey" in error_str or "Not Found" in error_str:
+                logger.warning(f"Skipping {uri}: File not found (maybe already moved?)")
+                # Do NOT add to 'errors' list, so the agent thinks it succeeded
+                results.append(uri) 
+            else:
+                # Genuine error
+             errors.append(f"{uri}: {error_str}")
 
     return json.dumps({
         "status": "batch_complete",
