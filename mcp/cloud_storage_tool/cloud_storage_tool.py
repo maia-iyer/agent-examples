@@ -314,57 +314,58 @@ def get_objects(bucket_uri: str) -> str:
         return json.dumps({"error": str(e)})
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False})
-def perform_action(source_uri: str, action: str, target_uri: str) -> str:
+def perform_batch_action(source_uris: list[str], action: str, target_folder: str) -> str:
     """
-    Performs the configured action (move or copy) between cloud storage locations.
+    Efficiently moves or copies MULTIPLE files at once. 
+    Use this to organize many files in a single step.
     
     Args:
-        source_uri: The full URI of the file to move/copy (e.g., s3://bucket/path/to/file.txt)
-        action: Action to perform - either 'move' or 'copy'
-        target_uri: The destination folder URI. Must end with '/' (e.g., s3://bucket/folder/)
+        source_uris: List of full source URIs (e.g. ["s3://b/f1.pdf", "s3://b/f2.pdf"])
+        action: 'move' or 'copy'
+        target_folder: Destination folder ending with '/' (e.g. "s3://b/Code/")
     """
-    # Renamed variable in log for consistency
-    logger.debug(f"Performing action '{action}' from '{source_uri}' to '{target_uri}'")
+    # 1. Validate Target
+    if not target_folder.endswith("/"):
+        return json.dumps({"error": f"Target folder must end with '/': {target_folder}"})
 
-    if action not in ["move", "copy"]:
-        return json.dumps({"error": f"Invalid action '{action}'. Must be 'move' or 'copy'"})
+    results = []
+    errors = []
     
-    if not target_uri.endswith("/"):
-        return json.dumps({"error": f"Target URI must be a folder path ending with '/': {target_uri}"})
-    
-    try:
-        # UPDATED: Use source_uri here
-        source_provider, source_bucket, source_path = parse_cloud_uri(source_uri)
-        target_provider, target_bucket, target_folder = parse_cloud_uri(target_uri)
-        
-        if source_provider != target_provider:
-            return json.dumps({"error": f"Cross-provider operations not supported. Source is {source_provider}, target is {target_provider}"})
-        
-        filename = os.path.basename(source_path)
-        target_path = os.path.join(target_folder, filename).replace("\\", "/")
-        
-        full_source_uri = f"{source_provider}://{source_bucket}/{source_path}"
-        full_target_uri = f"{target_provider}://{target_bucket}/{target_path}"
-        
-        copy_object_unified(source_provider, source_bucket, source_path, target_bucket, target_path)
-        
-        result = {
-            "source_uri": full_source_uri, # Updated key for consistency
-            "action": action,
-            "target_uri": full_target_uri
-        }
+    logger.info(f"Batch processing {len(source_uris)} files to {target_folder}")
 
-        if action == "move":
-            delete_object_unified(source_provider, source_bucket, source_path)
-            logger.debug(f"Successfully moved '{full_source_uri}' to '{full_target_uri}'")
-        else:
-            logger.debug(f"Successfully copied '{full_source_uri}' to '{full_target_uri}'")
-        
-        return json.dumps(result)
-    
-    except Exception as e:
-        logger.error(f"Error performing {action} operation: {e}")
-        return json.dumps({"error": f"Failed to {action} file: {str(e)}"})
+    # 2. Loop through files in Python (Reliable!)
+    for uri in source_uris:
+        # Skip Nones if the model messed up the list
+        if not uri: 
+            continue
+            
+        try:
+            # Reuse your existing parsing logic
+            src_prov, src_bucket, src_path = parse_cloud_uri(uri)
+            tgt_prov, tgt_bucket, tgt_folder_path = parse_cloud_uri(target_folder)
+            
+            filename = os.path.basename(src_path)
+            # Construct destination path
+            final_target_path = os.path.join(tgt_folder_path, filename).replace("\\", "/")
+            
+            # Execute
+            copy_object_unified(src_prov, src_bucket, src_path, tgt_bucket, final_target_path)
+            
+            if action == "move":
+                delete_object_unified(src_prov, src_bucket, src_path)
+                
+            results.append(uri)
+            
+        except Exception as e:
+            logger.error(f"Failed to process {uri}: {e}")
+            errors.append(f"{uri}: {str(e)}")
+
+    return json.dumps({
+        "status": "batch_complete",
+        "success_count": len(results),
+        "failed_count": len(errors),
+        "errors": errors
+    })
 
 def run_server():
     transport = os.getenv("MCP_TRANSPORT", "streamable-http")
