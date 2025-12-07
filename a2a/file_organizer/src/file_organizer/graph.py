@@ -1,8 +1,7 @@
 import os
-from textwrap import dedent
 from langgraph.graph import StateGraph, MessagesState, START
 from langchain_mcp_adapters.client import MultiServerMCPClient
-from langchain_core.messages import SystemMessage, AIMessage
+from langchain_core.messages import SystemMessage,  AIMessage
 from langgraph.prebuilt import tools_condition, ToolNode
 from langchain_openai import ChatOpenAI
 
@@ -12,9 +11,10 @@ config = Configuration()
 
 # Extend MessagesState to include a final answer
 class ExtendedMessagesState(MessagesState):
-    final_answer: str = ""
+     final_answer: str = ""
 
 def get_mcpclient():
+    
     return MultiServerMCPClient({
         "cloud_storage": {
             "url": os.getenv("MCP_URL", "http://cloud-storage-tool:8000/mcp"),
@@ -30,29 +30,27 @@ async def get_graph(client) -> StateGraph:
         temperature=0,
     )
 
-    # Get tools and bind them (This handles the Schema!)
+    # Get tools asynchronously
     tools = await client.get_tools()
     llm_with_tools = llm.bind_tools(tools)
-    
     bucket_uri = os.getenv("BUCKET_URI")
-    bucket_context = f"Target bucket: {bucket_uri}" if bucket_uri else ""
 
-    # CLEANER SYSTEM PROMPT
-    sys_msg = SystemMessage(content=dedent(f"""
-    You are a precise file-organization assistant.
-    {bucket_context}
+    bucket_info = f"Target bucket: {bucket_uri}" if bucket_uri else "No bucket URI configured. Ask the user to specify which bucket to organize."
 
-    ## Standard Operating Procedure
-    1. **ANALYSIS:** Check if the user wants to 'move' or 'copy' files.
-    2. **DISCOVERY:** You MUST run `get_objects` first to identify available files and their specific URIs.
-    3. **EXECUTION:** - USE `perform_batch_action` for organizing multiple files at once.
-       - NEVER use wildcards (e.g., `*`) in file paths.
+    sys_msg = SystemMessage(content=f"""You are a file organization assistant for cloud storage buckets.
 
-    ## Critical Rules
-    - **Source of Truth:** Use the exact `source_uri` returned by `get_objects`. Do not guess paths.
-    - **Efficiency:** Do not generate 10 separate tool calls if you can do it in 1 batch call.
-    - **Safety:** If a tool fails, stop and report the specific error.
-    """))
+{bucket_info}
+
+Your workflow:
+1. Discover what tools are available to you by examining your tool list
+2. List or discover files in the bucket using the appropriate tool
+3. Analyze each file and decide how to organize it based on:
+   - File extension and type (e.g., .pdf, .jpg, .txt)
+   - Filename patterns or naming conventions
+   - Logical grouping (similar file types together)
+4. Use the appropriate tool to MOVE or COPY each file to its organized location
+5. Provide a summary of what you did
+""")
 
     # Node
     def assistant(state: ExtendedMessagesState) -> ExtendedMessagesState:
