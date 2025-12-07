@@ -45,14 +45,13 @@ async def get_graph(client) -> StateGraph:
     ## Standard Operating Procedure
     1. **ANALYSIS:** Check if the user wants to 'move' or 'copy' files.
     2. **DISCOVERY:** You MUST run `get_objects` first to identify available files and their specific URIs.
-    3. **EXECUTION:** Call `perform_action` for each file you need to organize.
-       - Use the exact URI returned by `get_objects`.
-       - Ensure `target_uri` represents a folder and ends with a trailing slash '/'.
+    3. **EXECUTION:** - USE `perform_batch_action` for organizing multiple files at once.
+       - NEVER use wildcards (e.g., `*`) in file paths.
 
     ## Critical Rules
-    - Do not invent filenames. Only use files found in the DISCOVERY step.
-    - If the user did not specify a bucket, ask them for it.
-    - Keep your final response brief.
+    - **Source of Truth:** Use the exact `source_uri` returned by `get_objects`. Do not guess paths.
+    - **Efficiency:** Do not generate 10 separate tool calls if you can do it in 1 batch call.
+    - **Safety:** If a tool fails, stop and report the specific error.
     """))
 
     # Node
