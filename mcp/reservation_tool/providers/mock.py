@@ -2,7 +2,7 @@
 
 import hashlib
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict
 from providers.base import ReservationProvider
 from schemas import Restaurant, Location, AvailabilitySlot, Reservation, CancellationReceipt
@@ -268,7 +268,7 @@ class MockProvider(ReservationProvider):
             # Deterministic availability based on hash of restaurant_id + time + party_size
             # This ensures consistent results for the same inputs
             seed = f"{restaurant_id}_{slot_time.isoformat()}_{party_size}"
-            hash_val = int(hashlib.md5(seed.encode()).hexdigest(), 16)
+            hash_val = int(hashlib.sha256(seed.encode()).hexdigest(), 16)
 
             # 70% of slots are available
             available = (hash_val % 10) < 7
@@ -307,10 +307,6 @@ class MockProvider(ReservationProvider):
         if not restaurant:
             raise ValueError(f"Restaurant {restaurant_id} not found")
 
-        # Generate confirmation code
-        confirmation_code = f"RES{self._reservation_counter:06d}"
-        self._reservation_counter += 1
-
         # Check if duplicate (idempotency)
         # For simplicity, check if same email+datetime+restaurant already has a reservation
         duplicate_key = f"{email}_{date_time}_{restaurant_id}"
@@ -320,8 +316,12 @@ class MockProvider(ReservationProvider):
                 logger.info(f"Returning existing reservation (idempotent): {existing_res.id}")
                 return existing_res
 
+        # Generate confirmation code (only for new reservations)
+        confirmation_code = f"RES{self._reservation_counter:06d}"
+        self._reservation_counter += 1
+
         # Create new reservation
-        reservation_id = f"reservation_{hashlib.md5(confirmation_code.encode()).hexdigest()[:12]}"
+        reservation_id = f"reservation_{hashlib.sha256(confirmation_code.encode()).hexdigest()[:12]}"
         reservation = Reservation(
             id=reservation_id,
             restaurant_id=restaurant_id,
@@ -334,7 +334,7 @@ class MockProvider(ReservationProvider):
             notes=notes,
             status="confirmed",
             confirmation_code=confirmation_code,
-            created_at=datetime.utcnow().isoformat(),
+            created_at=datetime.now(timezone.utc).isoformat(),
         )
 
         self._reservations[reservation_id] = reservation
@@ -358,7 +358,7 @@ class MockProvider(ReservationProvider):
             reservation_id=reservation_id,
             restaurant_name=reservation.restaurant_name,
             original_date_time=reservation.date_time,
-            cancelled_at=datetime.utcnow().isoformat(),
+            cancelled_at=datetime.now(timezone.utc).isoformat(),
             reason=reason,
             refund_policy="No charge for cancellations made more than 24 hours in advance",
         )

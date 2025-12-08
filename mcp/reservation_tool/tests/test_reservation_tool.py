@@ -1,6 +1,5 @@
 """Unit and integration tests for the reservation MCP server."""
 
-import json
 import sys
 from pathlib import Path
 import pytest

@@ -3,7 +3,6 @@
 """Simple test client for the reservation agent."""
 
 import time
-import json
 import requests
 import sys
 import io

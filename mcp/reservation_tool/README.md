@@ -4,7 +4,7 @@ A Model Context Protocol (MCP) server that provides tools for searching restaura
 
 ## Features
 
-- **5 MCP Tools** with proper Kagenti annotations (readOnly, destructive, idempotent hints)
+- **5 MCP Tools** with proper MCP annotations (readOnly, destructive, idempotent hints)
 - **Provider Abstraction Layer** for easy integration with different reservation backends
 - **MockProvider** with deterministic data for demonstration and testing
 - **Type-Safe** using Pydantic models for all data structures
@@ -353,11 +353,3 @@ elif provider_type == "mock":
 - Reservation modification (not just cancel)
 - Multi-restaurant search with geolocation
 - Integration with calendaring systems
-
-## Contributing
-
-See the main [CONTRIBUTING.md](../../CONTRIBUTING.md) guide in the agent-examples repository.
-
-## License
-
-This project is licensed under the Apache License 2.0 - see the [LICENSE](../../LICENSE) file for details.

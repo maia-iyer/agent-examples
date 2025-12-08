@@ -10,11 +10,9 @@ import logging
 import json
 from typing import Optional
 from fastmcp import FastMCP
-from fastmcp.server.dependencies import get_access_token, AccessToken
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 
 from providers import MockProvider, ReservationProvider
-from schemas import Restaurant, AvailabilitySlot, Reservation, CancellationReceipt
 
 # Setup logging
 logger = logging.getLogger(__name__)
