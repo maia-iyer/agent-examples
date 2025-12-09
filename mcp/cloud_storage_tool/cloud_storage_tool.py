@@ -141,7 +141,7 @@ def list_objects_unified(provider: str, bucket_or_container: str) -> List[Dict[s
                     "created": obj['LastModified'].isoformat() if 'LastModified' in obj else None,
                     "updated": obj['LastModified'].isoformat() if 'LastModified' in obj else None,
                     "storage_class": obj.get('StorageClass'),
-                    "source_uri": f"s3://{bucket_or_container}/{obj['Key']}",
+                    "public_url": f"s3://{bucket_or_container}/{obj['Key']}"
                 })
     
     elif provider == "azure":
@@ -283,114 +283,87 @@ mcp = FastMCP("CloudStorage")
 def get_objects(bucket_uri: str) -> str:
     """Get all objects from a cloud storage bucket/container."""
     try:
+        # Parse URI to determine provider and bucket
         provider, bucket_name, _ = parse_cloud_uri(bucket_uri)
         
-        # Get raw objects
-        raw_objects = list_objects_unified(provider, bucket_name)
+        logger.debug(f"Getting objects from {provider} bucket '{bucket_name}'")
         
-        # FILTER: Create a clean list for the LLM
-        # This reduces token usage and prevents confusion
-        clean_objects = []
-        for obj in raw_objects:
-            # Construct the clean entry using source_uri
-            # Ensure your list_objects_unified actually sets 'source_uri'
-            # OR construct it here if list_objects_unified is hard to change
-            uri = obj.get('source_uri') or obj.get('file_uri') or f"{provider}://{bucket_name}/{obj['name']}"
-            
-            clean_objects.append({
-                "name": obj['name'],
-                "source_uri": uri  # This MUST match the argument in perform_action
-            })
+        # Get the raw list of objects
+        objects = list_objects_unified(provider, bucket_name)
+        
+        # Loop through and enrich each object with the full file_uri
+        for obj in objects:
+            # This assumes your list_objects_unified returns dicts
+            # and that the object key is stored in the 'name' field.
+            # Adjust 'name' if your key is stored differently (e.g., 'key')
+            if 'name' in obj:
+                obj['file_uri'] = f"{provider}://{bucket_name}/{obj['name']}"
+            else:
+                logger.warning(f"Object {obj} missing 'name' key, cannot construct file_uri")
 
-        logger.debug(f"Returning {len(clean_objects)} clean objects to LLM")
+        logger.debug(f"Successfully retrieved and processed {len(objects)} objects from {provider} bucket '{bucket_name}'")
         
         return json.dumps({
+            "provider": provider,
             "bucket": bucket_name,
-            "objects": clean_objects
+            "object_count": len(objects),
+            "objects": objects
         })
     
     except Exception as e:
         logger.error(f"Error listing objects: {e}")
-        return json.dumps({"error": str(e)})
+        return json.dumps({"error": f"Failed to list objects: {str(e)}"})
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False})
-def perform_batch_action(source_uris: list[str], action: str, target_folder: str) -> str:
+def perform_action(file_uri: str, target_uri: str) -> str:
     """
-    Efficiently moves or copies MULTIPLE files at once. 
-    Use this to organize many files in a single step.
+    Move object between cloud storage locations.
     
     Args:
-        source_uris: List of full source URIs (e.g. ["s3://b/f1.pdf", "s3://b/f2.pdf"])
-        action: 'move' or 'copy'
-        target_folder: Destination folder ending with '/' (e.g. "s3://b/Code/")
+        file_uri: Source file URI (example: 'gs://bucket/path/file.txt')
+        target_uri: Target folder URI (example: 'gs://bucket/folder/'). Must end with '/' for folder.
     """
-    # 1. Validate Target
-    if isinstance(source_uris, str):
-        try:
-            # Try standard JSON first
-            source_uris = json.loads(source_uris)
-        except json.JSONDecodeError:
-            try:
-                # Fallback: Handle single quotes (common in Python models) 
-                # e.g. "['s3://...', 's3://...']"
-                source_uris = ast.literal_eval(source_uris)
-            except Exception:
-                return json.dumps({"error": "source_uris must be a valid list or JSON array string"})
     
-    # Validation: Ensure it ended up as a list
-    if not isinstance(source_uris, list):
-        return json.dumps({"error": f"source_uris must be a list, got {type(source_uris)}"})
-    # -------------------------------------
-
-    # Validate Target
-    if not target_folder.endswith("/"):
-        return json.dumps({"error": f"Target folder must end with '/': {target_folder}"})
-
-    results = []
-    errors = []
+    # Validate target is a folder (ends with /)
+    if not target_uri.endswith("/"):
+        return json.dumps({"error": f"Target URI must be a folder path ending with '/': {target_uri}"})
     
-    logger.info(f"Batch processing {len(source_uris)} files to {target_folder}")
-
-    # 2. Loop through files in Python (Reliable!)
-    for uri in source_uris:
-        # Skip Nones if the model messed up the list
-        if not uri: 
-            continue
-            
-        try:
-            # Reuse your existing parsing logic
-            src_prov, src_bucket, src_path = parse_cloud_uri(uri)
-            tgt_prov, tgt_bucket, tgt_folder_path = parse_cloud_uri(target_folder)
-            
-            filename = os.path.basename(src_path)
-            # Construct destination path
-            final_target_path = os.path.join(tgt_folder_path, filename).replace("\\", "/")
-            
-            # Execute
-            copy_object_unified(src_prov, src_bucket, src_path, tgt_bucket, final_target_path)
-            
-            if action == "move":
-                delete_object_unified(src_prov, src_bucket, src_path)
-                
-            results.append(uri)
-            
-        except Exception as e:
-            # Check if it's the specific "NoSuchKey" error
-            error_str = str(e)
-            if "NoSuchKey" in error_str or "Not Found" in error_str:
-                logger.warning(f"Skipping {uri}: File not found (maybe already moved?)")
-                # Do NOT add to 'errors' list, so the agent thinks it succeeded
-                results.append(uri) 
-            else:
-                # Genuine error
-             errors.append(f"{uri}: {error_str}")
-
-    return json.dumps({
-        "status": "batch_complete",
-        "success_count": len(results),
-        "failed_count": len(errors),
-        "errors": errors
-    })
+    try:
+        # Parse source and target URIs
+        source_provider, source_bucket, source_path = parse_cloud_uri(file_uri)
+        target_provider, target_bucket, target_folder = parse_cloud_uri(target_uri)
+        
+        # Ensure providers match
+        if source_provider != target_provider:
+            return json.dumps({"error": f"Cross-provider operations not supported. Source is {source_provider}, target is {target_provider}"})
+        
+        # Extract filename from source path
+        filename = os.path.basename(source_path)
+        
+        # Construct full target blob path (folder + filename)
+        target_path = os.path.join(target_folder, filename).replace("\\", "/")
+        
+        # Construct full URIs for response
+        full_source_uri = f"{source_provider}://{source_bucket}/{source_path}"
+        full_target_uri = f"{target_provider}://{target_bucket}/{target_path}"
+        
+        # Perform copy operation
+        copy_object_unified(source_provider, source_bucket, source_path, target_bucket, target_path)
+        
+        result = {
+            "status": "success"
+        }
+        
+        # If action is move, delete the source
+        delete_object_unified(source_provider, source_bucket, source_path)
+        logger.debug(f"Successfully moved '{full_source_uri}' to '{full_target_uri}'")
+        result["message"] = f"File moved from {full_source_uri} to {full_target_uri}"
+        
+        return json.dumps(result)
+    
+    except Exception as e:
+        logger.error(f"Error performing move operation: {e}")
+        return json.dumps({"error": f"Failed to move file: {str(e)}"})
 
 def run_server():
     transport = os.getenv("MCP_TRANSPORT", "streamable-http")
