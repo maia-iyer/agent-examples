@@ -315,20 +315,14 @@ def get_objects(bucket_uri: str) -> str:
         return json.dumps({"error": f"Failed to list objects: {str(e)}"})
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False})
-def perform_action(file_uri: str, action: str, target_uri: str) -> str:
+def perform_action(file_uri: str, target_uri: str) -> str:
     """
-    Performs the configured action (move or copy) between cloud storage locations.
+    Move object between cloud storage locations.
     
     Args:
-        file_uri: Source file URI (e.g., 'gs://bucket/path/file.txt')
-        action: Action to perform - either 'move' or 'copy'
-        target_uri: Target folder URI (e.g., 'gs://bucket/folder/'). Must end with '/' for folder.
+        file_uri: Source file URI (example: 'gs://bucket/path/file.txt')
+        target_uri: Target folder URI (example: 'gs://bucket/folder/'). Must end with '/' for folder.
     """
-    logger.debug(f"Performing action '{action}' from '{file_uri}' to '{target_uri}'")
-
-    # Validate action
-    if action not in ["move", "copy"]:
-        return json.dumps({"error": f"Invalid action '{action}'. Must be 'move' or 'copy'"})
     
     # Validate target is a folder (ends with /)
     if not target_uri.endswith("/"):
@@ -357,29 +351,19 @@ def perform_action(file_uri: str, action: str, target_uri: str) -> str:
         copy_object_unified(source_provider, source_bucket, source_path, target_bucket, target_path)
         
         result = {
-            "action": action,
-            "provider": source_provider,
-            "source": full_source_uri,
-            "target": full_target_uri,
-            "target_folder": f"{target_provider}://{target_bucket}/{target_folder}",
-            "filename": filename,
             "status": "success"
         }
         
         # If action is move, delete the source
-        if action == "move":
-            delete_object_unified(source_provider, source_bucket, source_path)
-            logger.debug(f"Successfully moved '{full_source_uri}' to '{full_target_uri}'")
-            result["message"] = f"File moved from {full_source_uri} to {full_target_uri}"
-        else:
-            logger.debug(f"Successfully copied '{full_source_uri}' to '{full_target_uri}'")
-            result["message"] = f"File copied from {full_source_uri} to {full_target_uri}"
+        delete_object_unified(source_provider, source_bucket, source_path)
+        logger.debug(f"Successfully moved '{full_source_uri}' to '{full_target_uri}'")
+        result["message"] = f"File moved from {full_source_uri} to {full_target_uri}"
         
         return json.dumps(result)
     
     except Exception as e:
-        logger.error(f"Error performing {action} operation: {e}")
-        return json.dumps({"error": f"Failed to {action} file: {str(e)}"})
+        logger.error(f"Error performing move operation: {e}")
+        return json.dumps({"error": f"Failed to move file: {str(e)}"})
 
 def run_server():
     transport = os.getenv("MCP_TRANSPORT", "streamable-http")
