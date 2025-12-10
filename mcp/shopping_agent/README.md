@@ -190,9 +190,7 @@ When users ask for product recommendations:
 ### Technologies Used
 
 - **FastMCP**: MCP server framework
-- **LangChain Community**: SerpAPI wrapper for product search
-- **SerpAPI**: Real-time product search across retailers
-
+- **SerpAPI Python Client (`google-search-results`)**: Direct integration for real-time product search across retailers
 ## Usage Examples
 
 ### Example 1: Basic Product Search
