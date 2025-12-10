@@ -26,9 +26,6 @@ cat > .env.local << 'EOF'
 # Shopping Agent MCP Server - Local Environment Configuration
 # Load this file: source .env.local
 
-# Required: OpenAI API Key (https://platform.openai.com/api-keys)
-export OPENAI_API_KEY="your-openai-api-key-here"
-
 # Required: SerpAPI Key (https://serpapi.com/manage-api-key)
 export SERPAPI_API_KEY="your-serpapi-api-key-here"
 
