@@ -409,7 +409,6 @@ docker-compose up
 - Review the [README.md](README.md) for detailed documentation
 - Review the [ARCHITECTURE.md](ARCHITECTURE.md) for architecture details
 - Verify API key has sufficient quota at https://serpapi.com/dashboard
-- Test with the provided `simple_test.py` script
 
 ## Summary
 
