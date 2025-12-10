@@ -62,7 +62,8 @@ def recommend_products(query: str, maxResults: int = 10) -> str:
             "num": maxResults
         }
         
-        logger.debug(f"Searching with params: {json.dumps(params, default=str)}")
+        safe_params = {k: v for k, v in params.items() if k != "api_key"}
+        logger.debug(f"Searching with params: {json.dumps(safe_params, default=str)}")
         search = GoogleSearch(params)
         results = search.get_dict()
         
