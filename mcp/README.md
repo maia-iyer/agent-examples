@@ -176,23 +176,9 @@ The Shopping Agent demonstrates an advanced MCP tool with:
 ```
 User Query
     ↓
-Parse Query Node (OpenAI)
-    ↓
-Search Products Node (SerpAPI)
-    ↓
-Generate Recommendations Node (OpenAI)
+SerpAPI Search
     ↓
 Structured Response
-```
-
-**Key Technologies**:
-- **LangGraph**: Multi-node agent workflow with state management
-- **LangChain**: LLM framework for tool integration
-- **OpenAI**: Natural language understanding and generation
-- **SerpAPI**: Real-time search across retailers
-
-See [shopping_agent/ARCHITECTURE.md](shopping_agent/ARCHITECTURE.md) for detailed architecture.
-
 ## Creating Your Own MCP Tool
 
 ### Basic Template
