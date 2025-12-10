@@ -333,7 +333,6 @@ If you encounter import errors:
 ```
 shopping_agent/
 ├── shopping_agent.py       # Main MCP server with SerpAPI integration
-├── simple_test.py          # Test script for product search
 ├── pyproject.toml          # Dependencies and project metadata
 ├── README.md               # This file
 ├── Dockerfile              # Container configuration
