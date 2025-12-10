@@ -10,7 +10,6 @@ from fastmcp import FastMCP
 from serpapi import GoogleSearch
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), stream=sys.stdout, format='%(levelname)s: %(message)s')
 
 
 def _env_flag(name: str, default: str = "false") -> bool:
@@ -28,7 +27,7 @@ mcp = FastMCP("Shopping Agent")
 
 
 @mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True})
-def recommend_products(query: str, maxResults: int = 10) -> str:
+def recommend_products(query: str, max_results: int = 10) -> str:
     """
     Recommend products based on natural language query (e.g., "good curtains under $40")
     
@@ -37,7 +36,7 @@ def recommend_products(query: str, maxResults: int = 10) -> str:
     
     Args:
         query: Natural language product request
-        maxResults: Maximum number of product recommendations to return (default 10, max 20)
+        max_results: Maximum number of product recommendations to return (default 10, max 20)
     
     Returns:
         JSON string containing product search results with names, prices, descriptions, and links.
@@ -47,8 +46,8 @@ def recommend_products(query: str, maxResults: int = 10) -> str:
     if not SERPAPI_API_KEY:
         return json.dumps({"error": "SERPAPI_API_KEY not configured"})
     
-    # Limit maxResults
-    maxResults = min(maxResults, 20)
+    # Limit max_results
+    max_results = min(max_results, 20)
     
     try:
         # Configure SerpAPI Google Shopping search
@@ -59,11 +58,10 @@ def recommend_products(query: str, maxResults: int = 10) -> str:
             "google_domain": "google.com",
             "gl": "us",
             "hl": "en",
-            "num": maxResults
+            "num": max_results
         }
         
-        safe_params = {k: v for k, v in params.items() if k != "api_key"}
-        logger.debug(f"Searching with params: {json.dumps(safe_params, default=str)}")
+        logger.debug(f"Searching with params: {json.dumps(params, default=str)}")
         search = GoogleSearch(params)
         results = search.get_dict()
         
@@ -96,8 +94,8 @@ def recommend_products(query: str, maxResults: int = 10) -> str:
             
         return json.dumps({
             "query": query,
-            "products": products[:maxResults],
-            "count": len(products[:maxResults])
+            "products": products[:max_results],
+            "count": len(products[:max_results])
         }, indent=2)
         
     except Exception as e:
@@ -106,13 +104,13 @@ def recommend_products(query: str, maxResults: int = 10) -> str:
 
 
 @mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True})
-def search_products(query: str, maxResults: int = 10) -> str:
+def search_products(query: str, max_results: int = 10) -> str:
     """
     Search for products using standard Google Search (internal tool)
     
     Args:
         query: Product search query
-        maxResults: Maximum number of results to return (default 10, max 100)
+        max_results: Maximum number of results to return (default 10, max 100)
     
     Returns:
         JSON string containing search results
@@ -122,8 +120,8 @@ def search_products(query: str, maxResults: int = 10) -> str:
     if not SERPAPI_API_KEY:
         return json.dumps({"error": "SERPAPI_API_KEY not configured"})
     
-    # Limit maxResults
-    maxResults = min(maxResults, 100)
+    # Limit max_results
+    max_results = min(max_results, 100)
     
     try:
         # Use standard Google Search for broader context
@@ -134,7 +132,7 @@ def search_products(query: str, maxResults: int = 10) -> str:
             "google_domain": "google.com",
             "gl": "us",
             "hl": "en",
-            "num": maxResults
+            "num": max_results
         }
         
         search = GoogleSearch(params)
@@ -143,10 +141,10 @@ def search_products(query: str, maxResults: int = 10) -> str:
         if "error" in results:
             return json.dumps({"error": results["error"]})
             
-        return json.dumps({
+            return json.dumps({
             "query": query,
-            "organic_results": results.get("organic_results", [])[:maxResults],
-            "shopping_results": results.get("shopping_results", [])[:maxResults]
+            "organic_results": results.get("organic_results", [])[:max_results],
+            "shopping_results": results.get("shopping_results", [])[:max_results]
         }, indent=2)
         
     except Exception as e:
@@ -242,6 +240,13 @@ def _parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    # Configure logging only when run as a script, not on import
+    logging.basicConfig(
+        level=os.getenv("LOG_LEVEL", "INFO"),
+        stream=sys.stdout,
+        format="%(levelname)s: %(message)s",
+    )
+
     args = _parse_args()
 
     if SERPAPI_API_KEY is None:

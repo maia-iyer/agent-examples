@@ -204,6 +204,7 @@ My top recommendation is the Winter Wool Scarf for its superior quality and warm
 - **Results**: Aggregated product listings
 
 
+
 ## Error Handling
 
 ### Error Flow
@@ -234,7 +235,7 @@ Except Exception:
 2. **API Quota Errors**: SerpAPI rate limits exceeded
 3. **Network Errors**: Connection failures
 4. **Parsing Errors**: Invalid search results format
-5. **Validation Errors**: Invalid parameters (maxResults bounds, etc.)
+5. **Validation Errors**: Invalid parameters (max_results bounds, etc.)
 
 ## Performance Characteristics
 
@@ -251,7 +252,7 @@ Total Request Time: ~2-4 seconds
 ### Optimization Strategies
 
 1. **Efficient Parsing**: Lightweight result parsing
-2. **Result Limiting**: maxResults parameter (default 10, max 20 for recommend_products)
+2. **Result Limiting**: max_results parameter (default 10, max 20 for recommend_products)
 3. **Simple Processing**: No complex AI processing on server side
 4. **Stateless Design**: No session management overhead
 
@@ -290,7 +291,7 @@ Environment Variables
 ### Input Validation
 
 - Query length limits
-- maxResults bounds checking (10 default, 20 max for recommend_products, 100 max for search_products)
+- max_results bounds checking (10 default, 20 max for recommend_products, 100 max for search_products)
 - Parameter type validation
 - Error message sanitization
 

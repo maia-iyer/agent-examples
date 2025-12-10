@@ -1,9 +1,6 @@
 # Shopping Agent MCP Server Configuration Example
 # Copy this file to .env or export these variables in your shell
 
-# Required: OpenAI API Key
-# Get your key from: https://platform.openai.com/api-keys
-export OPENAI_API_KEY="sk-your-openai-api-key-here"
 
 # Required: SerpAPI Key
 # Get your key from: https://serpapi.com/manage-api-key

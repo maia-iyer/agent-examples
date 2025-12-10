@@ -18,7 +18,7 @@ Searches for products based on a natural language query and returns structured p
 
 **Parameters:**
 - `query` (string, required): Natural language product request (e.g., "I want to buy a scarf for 40 dollars")
-- `maxResults` (integer, optional): Maximum number of results (default: 10, max: 20)
+- `max_results` (integer, optional): Maximum number of results (default: 10, max: 20)
 
 **Returns:**
 ```json
@@ -52,7 +52,7 @@ Search for products across retailers (lower-level tool for raw search results).
 
 **Parameters:**
 - `query` (string, required): Product search query
-- `maxResults` (integer, optional): Maximum results to return (default: 10, max: 100)
+- `max_results` (integer, optional): Maximum results to return (default: 10, max: 100)
 
 **Returns:**
 Raw search results from SerpAPI.
@@ -73,7 +73,7 @@ Raw search results from SerpAPI.
 2. **Install Dependencies:**
 
 ```bash
-cd mcp/shopping_agent
+cd mcp/shopping_tool
 uv pip install -e .
 ```
 
@@ -99,7 +99,7 @@ export LOG_LEVEL="INFO"                   # Logging level (default: INFO)
 ### Development Mode
 
 ```bash
-cd mcp/shopping_agent
+cd mcp/shopping_tool
 export SERPAPI_API_KEY="your-serpapi-key"
 python shopping_agent.py
 ```
@@ -124,7 +124,7 @@ Follow these steps to debug the shopping agent with the official MCP Inspector U
 
 1. Start the server on its own port using HTTP transport:
    ```bash
-   cd mcp/shopping_agent
+   cd mcp/shopping_tool
    export SERPAPI_API_KEY="your-key"
    MCP_TRANSPORT=http PORT=8001 python shopping_agent.py
    ```
@@ -190,7 +190,9 @@ When users ask for product recommendations:
 ### Technologies Used
 
 - **FastMCP**: MCP server framework
-- **SerpAPI Python Client (`google-search-results`)**: Direct integration for real-time product search across retailers
+- **LangChain Community**: SerpAPI wrapper for product search
+- **SerpAPI**: Real-time product search across retailers
+
 ## Usage Examples
 
 ### Example 1: Basic Product Search
@@ -268,19 +270,6 @@ When users ask for product recommendations:
 # This product checks all your boxes and comes from Sony, a trusted brand in audio..."
 ```
 
-## Testing
-
-### Using Python Test Script
-
-Test the shopping agent MCP server:
-
-```bash
-cd mcp/shopping_agent
-export SERPAPI_API_KEY="your-serpapi-key"
-python simple_test.py
-```
-
-This will test the product search functionality and show the structured data returned by the server.
 
 ### Using curl
 
@@ -293,7 +282,7 @@ curl -X POST http://localhost:8000/mcp/tools/recommend_products \
   -H "Accept: application/json, text/event-stream" \
   -d '{
     "query": "I want to buy a scarf for 40 dollars",
-    "maxResults": 5
+    "max_results": 5
   }'
 ```
 
@@ -331,8 +320,9 @@ If you encounter import errors:
 ### Project Structure
 
 ```
-shopping_agent/
+shopping_tool/
 ├── shopping_agent.py       # Main MCP server with SerpAPI integration
+├── simple_test.py          # Test script for product search
 ├── pyproject.toml          # Dependencies and project metadata
 ├── README.md               # This file
 ├── Dockerfile              # Container configuration

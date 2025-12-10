@@ -26,7 +26,7 @@ source ~/.zshrc
 ### Step 2: Install Dependencies
 
 ```bash
-cd mcp/shopping_agent
+cd mcp/shopping_tool
 uv pip install -e .
 ```
 
@@ -57,7 +57,7 @@ curl -X POST http://localhost:8000/mcp/tools/recommend_products \
   -H "Accept: application/json, text/event-stream" \
   -d '{
     "query": "I want to buy a scarf for 40 dollars",
-    "maxResults": 5
+    "max_results": 5
   }'
 ```
 
@@ -67,7 +67,7 @@ Use the MCP Inspector UI to explore the server interactively:
 
 1. Start the shopping agent with explicit port/transport:
    ```bash
-   cd mcp/shopping_agent
+   cd mcp/shopping_tool
    export SERPAPI_API_KEY="your-key"
    MCP_TRANSPORT=http PORT=8001 python shopping_agent.py
    ```
@@ -93,7 +93,7 @@ curl -X POST http://localhost:8000/mcp/tools/recommend_products \
   -H "Accept: application/json, text/event-stream" \
   -d '{
     "query": "I want to buy a scarf for 40 dollars",
-    "maxResults": 5
+    "max_results": 5
   }'
 ```
 
@@ -153,7 +153,7 @@ response = requests.post(
     },
     json={
         "query": "best laptop under $800 for programming",
-        "maxResults": 5
+        "max_results": 5
     }
 )
 
@@ -353,7 +353,7 @@ docker-compose up
 ```json
 {
   "query": "string (required) - Natural language product request",
-  "maxResults": "integer (optional) - Max results (default: 10, max: 20)"
+  "max_results": "integer (optional) - Max results (default: 10, max: 20)"
 }
 ```
 
@@ -382,7 +382,7 @@ docker-compose up
 ```json
 {
   "query": "string (required) - Search query",
-  "maxResults": "integer (optional) - Max results (default: 10, max: 100)"
+  "max_results": "integer (optional) - Max results (default: 10, max: 100)"
 }
 ```
 
@@ -409,6 +409,7 @@ docker-compose up
 - Review the [README.md](README.md) for detailed documentation
 - Review the [ARCHITECTURE.md](ARCHITECTURE.md) for architecture details
 - Verify API key has sufficient quota at https://serpapi.com/dashboard
+- Test with the provided `simple_test.py` script
 
 ## Summary
 
