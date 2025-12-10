@@ -1,12 +1,10 @@
 # Image MCP tool - returns images from picsum.photos.
 
 import base64
-import json
 import logging
 import os
 import requests
 import sys
-from typing import Optional
 from fastmcp import FastMCP
 
 mcp = FastMCP("Image")
@@ -34,10 +32,9 @@ def get_image(height: int, width: int) -> dict:
         w = int(width)
         if h <= 0 or w <= 0:
             return {"error": "height and width must be positive integers"}
-    except Exception:
+    except (ValueError, TypeError):
         return {"error": "height and width must be integers"}
-
-    url = f"https://picsum.photos/{h}/{w}"
+    url = f"https://picsum.photos/{w}/{h}"
 
     try:
         resp = requests.get(url, timeout=10)
@@ -46,7 +43,7 @@ def get_image(height: int, width: int) -> dict:
         img_b64 = base64.b64encode(img_b).decode("ascii")
         logger.info(f"Successfully fetched and encoded {h}x{w} image, base64 length={len(img_b64)}")
         return {"image_base64": img_b64, "url": url}
-    except Exception as e:
+    except requests.RequestException as e:
         logger.error("failed to fetch image: %s", e)
         return {"error": str(e), "url": url}
 

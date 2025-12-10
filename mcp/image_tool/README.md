@@ -3,9 +3,9 @@
 Small MCP server that returns images from the https://picsum.photos service.
 
 Tools
-- `get_image(height, width, as_base64=False)`
-  - If `as_base64` is False (default) returns `{"url": "https://picsum.photos/<h>/<w>"}`.
-  - If `as_base64` is True the tool fetches the image and returns `{"image_base64": "<base64>", "url": "..."}`.
+- `get_image(height, width)`
+  - Returns `{"image_base64": "<base64>", "url": "https://picsum.photos/<h>/<w>"}`.
+
 
 Run locally
 
