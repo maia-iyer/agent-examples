@@ -101,7 +101,6 @@ curl -X POST http://localhost:8000/tools/recommend_products \
 - [README.md](shopping_agent/README.md) - Full documentation
 - [QUICKSTART.md](shopping_agent/QUICKSTART.md) - Quick start guide
 - [ARCHITECTURE.md](shopping_agent/ARCHITECTURE.md) - Architecture details
-- [VERIFICATION.md](shopping_agent/VERIFICATION.md) - Requirements verification
 
 ## Getting Started
 
