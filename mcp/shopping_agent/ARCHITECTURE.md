@@ -203,14 +203,6 @@ My top recommendation is the Winter Wool Scarf for its superior quality and warm
 - **Authentication**: API key via environment variable
 - **Results**: Aggregated product listings
 
-### LangChain Components
-
-```
-langchain_community.utilities.SerpAPIWrapper
-    ├── Search query optimization
-    ├── Result parsing
-    └── API key management
-```
 
 ## Error Handling
 
