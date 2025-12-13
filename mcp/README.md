@@ -61,7 +61,7 @@ Interact with GitHub repositories (written in Go).
 **Requirements**:
 - GitHub authentication token
 
-### 5. Shopping Agent (`shopping_agent/`) ⭐ NEW
+### 5. Shopping Agent (`shopping_tool/`) ⭐ NEW
 
 AI-powered shopping recommendations using LangChain, LangGraph, OpenAI, and SerpAPI.
 
