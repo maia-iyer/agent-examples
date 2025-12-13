@@ -24,6 +24,27 @@ SERPAPI_API_KEY = os.getenv("SERPAPI_API_KEY")
 # Initialize FastMCP
 mcp = FastMCP("Shopping Agent")
 
+# Public agent card for A2A discovery
+AGENT_CARD = {
+    "name": "shopping-agent",
+    "version": "1.0.0",
+    "description": "Shopping MCP tool using SerpAPI for product search",
+    "capabilities": {
+        "mcp": {
+            # Using cluster DNS; adjust if you front this with ingress
+            "endpoints": [
+                {
+                    "type": "http",
+                    "url": os.getenv(
+                        "AGENT_CARD_MCP_URL",
+                        "http://shopping-agent:8000/mcp",
+                    ),
+                }
+            ]
+        }
+    },
+}
+
 
 @mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True})
 def recommend_products(query: str, max_results: int = 10) -> str:
@@ -149,12 +170,15 @@ def search_products(query: str, max_results: int = 10) -> str:
         
         if "error" in results:
             return json.dumps({"error": results["error"]})
-            
-            return json.dumps({
-            "query": query,
-            "organic_results": results.get("organic_results", [])[:max_results],
-            "shopping_results": results.get("shopping_results", [])[:max_results]
-        }, indent=2)
+
+        return json.dumps(
+            {
+                "query": query,
+                "organic_results": results.get("organic_results", [])[:max_results],
+                "shopping_results": results.get("shopping_results", [])[:max_results],
+            },
+            indent=2,
+        )
         
     except Exception as e:
         logger.error(f"Error in search_products: {e}", exc_info=True)
@@ -197,6 +221,14 @@ def run_server(
         json_response=json_response,
         stateless_http=stateless_http,
     )
+
+
+# Attach agent card route if FastMCP exposes the FastAPI app
+app = getattr(mcp, "app", None)
+if app:
+    @app.get("/.well-known/agent.json")
+    def agent_card() -> Dict[str, Any]:
+        return AGENT_CARD
 
 
 def _parse_args() -> argparse.Namespace:
@@ -264,6 +296,7 @@ def main() -> int:
     
     logger.info("Starting Shopping Agent MCP Server with SerpAPI")
     logger.info("Note: This server provides search results. The calling agent provides reasoning.")
+    
     run_server(
         transport=args.transport,
         host=args.host,
