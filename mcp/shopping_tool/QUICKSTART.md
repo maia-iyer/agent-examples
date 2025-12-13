@@ -135,7 +135,7 @@ curl -X POST http://localhost:8000/mcp/tools/recommend_products \
   -H "Accept: application/json, text/event-stream" \
   -d '{
     "query": "wireless headphones under $100 with noise cancellation",
-    "maxResults": 5
+    "max_results": 5
   }'
 ```
 
