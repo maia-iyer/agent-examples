@@ -143,7 +143,7 @@ Tip: run the `movie_tool` server on a different port (for example `PORT=8002 MCP
 ### Using Docker
 
 ```bash
-cd mcp/shopping_agent
+cd mcp/shopping_tool
 
 # Build the image
 docker build -t shopping-agent-mcp .
