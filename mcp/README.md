@@ -92,8 +92,6 @@ curl -X POST http://localhost:8000/tools/recommend_products \
 
 **Technologies**:
 - FastMCP - MCP server framework
-- LangChain - LLM application framework
-- LangGraph - Agent workflow orchestration
 - OpenAI GPT-4o-mini - Natural language understanding/generation
 - SerpAPI - Product search across retailers
 
