@@ -41,6 +41,11 @@ def recommend_products(query: str, max_results: int = 10) -> str:
     Returns:
         JSON string containing product search results with names, prices, descriptions, and links.
     """
+    # Validate query input
+    if not isinstance(query, str) or not query.strip():
+        return json.dumps({"error": "Query must not be empty."})
+    if len(query) > 256:
+        return json.dumps({"error": "Query is too long (max 256 characters)."})
     logger.info(f"Searching products for query: '{query}'")
     
     if not SERPAPI_API_KEY:
