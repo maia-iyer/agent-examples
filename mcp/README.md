@@ -164,7 +164,7 @@ Tools use annotations to describe their behavior:
 | Movie | Python | FastMCP | requests + OMDb |
 | Slack | Python | FastMCP | slack_sdk |
 | GitHub | Go | Custom | GitHub API |
-| Shopping Agent | Python | FastMCP | LangChain + LangGraph |
+| Shopping Agent | Python | FastMCP | SerpAPI |
 
 ## Advanced Example: Shopping Agent Architecture
 
