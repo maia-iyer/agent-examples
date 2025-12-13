@@ -115,6 +115,11 @@ def search_products(query: str, max_results: int = 10) -> str:
     Returns:
         JSON string containing search results
     """
+    # Validate query input
+    if not isinstance(query, str) or not query.strip():
+        return json.dumps({"error": "Query parameter must be a non-empty string."})
+    if len(query) > 256:
+        return json.dumps({"error": "Query parameter is too long (max 256 characters)."})
     logger.info(f"Searching products for query: '{query}'")
     
     if not SERPAPI_API_KEY:
