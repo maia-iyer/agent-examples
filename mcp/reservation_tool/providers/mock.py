@@ -208,7 +208,11 @@ class MockProvider(ReservationProvider):
         price_tier: Optional[int] = None,
         distance_km: Optional[float] = None,
     ) -> List[Restaurant]:
-        """Search restaurants with filters."""
+        """Search restaurants with filters.
+
+        Note: The `date_time` and `distance_km` parameters are ignored in this mock implementation,
+        but would be used by real providers to filter results by availability and proximity.
+        """
         logger.debug(f"Searching restaurants in {city} with filters: cuisine={cuisine}, price_tier={price_tier}")
 
         results = []

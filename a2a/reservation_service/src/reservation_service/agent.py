@@ -120,8 +120,6 @@ class ReservationExecutor(AgentExecutor):
         input = {"messages": messages}
         logger.info(f'Processing messages: {input}')
 
-        task_updater = TaskUpdater(event_queue, task.id, task.context_id)
-
         try:
             output = None
             # Test MCP connection first
@@ -154,8 +152,11 @@ class ReservationExecutor(AgentExecutor):
                 )
                 output = event
                 logger.info(f'event: {event}')
-            output = output.get("assistant", {}).get("final_answer")
-            await event_emitter.emit_event(str(output), final=True)
+            if output is not None:
+                final_answer = output.get("assistant", {}).get("final_answer")
+                await event_emitter.emit_event(str(final_answer), final=True)
+            else:
+                await event_emitter.emit_event("No events produced by the graph.", final=True)
         except Exception as e:
             logger.error(f'Graph execution error: {e}')
             await event_emitter.emit_event(f"Error: Failed to process reservation request. {str(e)}", failed=True)
