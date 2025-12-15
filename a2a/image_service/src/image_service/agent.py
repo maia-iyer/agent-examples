@@ -83,7 +83,7 @@ class ImageExecutor(AgentExecutor):
             task = new_task(context.message)  
             await event_queue.enqueue_event(task)
         task_updater = TaskUpdater(event_queue, task.id, task.context_id)
-        event_emitter = ImageEvent(task_updater)
+        event_emitter = ImageTaskEventEmitter(task_updater)
 
         try:
             # Test MCP connection first
@@ -111,7 +111,7 @@ class ImageExecutor(AgentExecutor):
                     + "\n"
                 )
                 output = event
-                
+
                 if output is None:
                     err_msg = "No events were produced by the graph stream; cannot process result."
                     logger.error(err_msg)
