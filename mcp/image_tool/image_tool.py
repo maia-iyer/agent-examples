@@ -13,12 +13,12 @@ logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), stream=sys.stdout, for
 
 
 @mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True})
-def get_image(height: int, width: int) -> dict:
+def get_image(width: int, height: int) -> dict:
     """Fetch a random image from picsum.photos API and return it as base64-encoded data.
 
     Parameters:
-    - height: image height in pixels (must be positive integer)
     - width: image width in pixels (must be positive integer)
+    - height: image height in pixels (must be positive integer)
 
     Returns a dict containing:
     - image_base64: base64-encoded image data (string)
@@ -41,7 +41,7 @@ def get_image(height: int, width: int) -> dict:
         resp.raise_for_status()
         img_b = resp.content
         img_b64 = base64.b64encode(img_b).decode("ascii")
-        logger.info(f"Successfully fetched and encoded {h}x{w} image, base64 length={len(img_b64)}")
+        logger.info(f"Successfully fetched and encoded {w}x{h} image, base64 length={len(img_b64)}")
         return {"image_base64": img_b64, "url": url}
     except requests.RequestException as e:
         logger.error("failed to fetch image: %s", e)
