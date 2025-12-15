@@ -1,6 +1,7 @@
 from langgraph.graph import StateGraph, MessagesState, START, END
 from langchain_mcp_adapters.client import MultiServerMCPClient
-from langchain_core.messages import SystemMessage, ToolMessage
+from langchain_core.messages import SystemMessage, ToolMessage, AIMessage
+from textwrap import dedent
 from langgraph.prebuilt import tools_condition, ToolNode
 from langchain_openai import ChatOpenAI
 import os
@@ -35,17 +36,22 @@ async def get_graph(client) -> StateGraph:
     llm_with_tools = llm.bind_tools(tools)
 
     # System message
-    sys_msg = SystemMessage(content=
-    """
+    sys_msg = SystemMessage(content=dedent(
+    """\
     You are a helpful assistant. Only call the get_image tool when the user EXPLICITLY asks for an image with specific dimensions (e.g., 'show me an image', 'generate an image 400x400', 'image 200 300'). 
     For any conversation that does NOT explicitly request an image, respond directly with text. DO NOT call any tools for these cases.
     When you do call get_image, you MUST provide valid positive integers for both height and width parameters.
     """)
+    )
 
     # Node
     def assistant(state: ExtendedMessagesState) -> ExtendedMessagesState:
         result = llm_with_tools.invoke([sys_msg] + state["messages"])
         state["messages"].append(result)
+        
+        if isinstance(result, AIMessage) and not result.tool_calls:
+            state["final_answer"] = {"raw": result.content}
+            return state
 
         # Find the most recent ToolMessage and set its content as final_answer.
         # NOTE: Only the most recent ToolMessage is processed intentionally.

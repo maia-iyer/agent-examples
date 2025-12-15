@@ -50,7 +50,7 @@ def get_agent_card(host: str, port: int):
     )
 
 
-class ImageEvent:
+class ImageTaskEventEmitter:
     def __init__(self, task_updater: TaskUpdater):
         self.task_updater = task_updater
 
@@ -87,14 +87,14 @@ class ImageExecutor(AgentExecutor):
 
         try:
             # Test MCP connection first
-            logger.info('Attempting to connect to MCP server at: %s', os.getenv("MCP_URL", "http://localhost:8000/sse"))
+            logger.info('Attempting to connect to MCP server at: %s', os.getenv("MCP_URL", "http://localhost:8000/mcp"))
             mcpclient = get_mcpclient()
             # Try to get tools to verify connection
             try:
                 tools = await mcpclient.get_tools()
                 logger.info('Successfully connected to MCP server. Available tools: %s', [tool.name for tool in tools])
             except Exception as tool_error:
-                logger.error(f'Failed to connect to MCP server: {tool_error}')
+                logger.error('Failed to connect to MCP server: %s', tool_error)
                 await event_emitter.emit_event(f"Error: Cannot connect to MCP image service at {os.getenv('MCP_URL', 'http://localhost:8000/mcp')}. Please ensure the image MCP server is running. Error: {tool_error}", failed=True)
                 return
 
@@ -111,6 +111,12 @@ class ImageExecutor(AgentExecutor):
                     + "\n"
                 )
                 output = event
+                
+                if output is None:
+                    err_msg = "No events were produced by the graph stream; cannot process result."
+                    logger.error(err_msg)
+                    await event_emitter.emit_event(err_msg, failed=True)
+                    return  
         
             result = output.get("assistant", {}).get("final_answer")
 
@@ -154,11 +160,16 @@ class ImageExecutor(AgentExecutor):
                     return
                 
                 # Fallback: treat as text
-                await event_emitter.emit_event(str(result), final=True)
+                if not result or (isinstance(result, str) and result.strip() == ""):
+                    await event_emitter.emit_event(
+                        "I am here to help with image requests. Please ask for an image with specific dimensions.",
+                        final=True
+                    )
+                else:
+                    await event_emitter.emit_event(str(result), final=True)
                 return
             except Exception as e:
                 err_msg = f"Error processing graph result: {e}"
-                logger.error(err_msg)
                 await event_emitter.emit_event(err_msg, failed=True)
                 return
 
@@ -169,7 +180,7 @@ class ImageExecutor(AgentExecutor):
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         """Not implemented"""
-        raise Exception("cancel not supported")
+        raise NotImplementedError("cancel not supported")
 
 def run():
     agent_card = get_agent_card(host="0.0.0.0", port=8000)
@@ -183,4 +194,4 @@ def run():
         agent_card=agent_card,
         http_handler=request_handler,
     )
-    uvicorn.run(server.build(), host="0.0.0.0", port=int(os.getenv("IMAGE_AGENT_PORT", "8000")))
+    uvicorn.run(server.build(), host="0.0.0.0", port=8000)
