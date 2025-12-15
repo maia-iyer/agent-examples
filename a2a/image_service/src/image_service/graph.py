@@ -51,34 +51,35 @@ async def get_graph(client) -> StateGraph:
         
         if isinstance(result, AIMessage) and not result.tool_calls:
             state["final_answer"] = {"raw": result.content}
-            return state
+        new_messages = state["messages"] + [result]
 
         # Find the most recent ToolMessage and set its content as final_answer.
         # NOTE: Only the most recent ToolMessage is processed intentionally.
         # If multiple tools are called in sequence, earlier tool results are 
         # intermediate steps, while the final ToolMessage represents the complete
         # answer to return to the user. The graph ends once final_answer is set.
-        for msg in reversed(state["messages"]):
+        final_answer = state.get("final_answer")
+        for msg in reversed(new_messages):
             if not isinstance(msg, ToolMessage):
                 continue
             try:
                 content = msg.content
                 if isinstance(content, str):
                     try:
-                        state["final_answer"] = json.loads(content)
+                        final_answer = json.loads(content)
                     except json.JSONDecodeError:
                         # JSON parsing failed, use raw content
-                        state["final_answer"] = {"raw": content}
+                        final_answer = {"raw": content}
                 else:
-                    state["final_answer"] = content
+                    final_answer = content
             except Exception as e:
-                state["final_answer"] = {
+                final_answer = {
                     "error": "Failed to process tool result",
                     "details": str(e)
                 }
             break
 
-        return state
+        return {"messages": new_messages, "final_answer": final_answer}
 
     # Build graph
     builder = StateGraph(ExtendedMessagesState)
