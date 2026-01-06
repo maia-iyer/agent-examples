@@ -94,10 +94,6 @@ class WeatherExecutor(AgentExecutor):
         """
         The agent allows to retrieve weather info through a natural language conversational interface
         """
-        
-        # Log authorization header for debugging
-        auth_header = context.call_context.get("authorization") if hasattr(context, 'call_context') else None
-        logger.info(f"🔐 Authorization header received: {auth_header[:50] + '...' if auth_header and len(auth_header) > 50 else auth_header}")
 
         # Setup Event Emitter
         task = context.current_task
