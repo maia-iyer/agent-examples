@@ -145,7 +145,7 @@ class ReservationExecutor(AgentExecutor):
             async for event in graph.astream(input, stream_mode="updates"):
                 await event_emitter.emit_event(
                     "\n".join(
-                        f"🤔 {key}: {str(value)[:100] + '...' if len(str(value)) > 100 else str(value)}"
+                        f"🤔 {key}: {str(value)[:256] + '...' if len(str(value)) > 256 else str(value)}"
                         for key, value in event.items()
                     )
                     + "\n"
