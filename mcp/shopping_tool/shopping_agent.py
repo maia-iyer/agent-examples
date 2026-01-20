@@ -5,6 +5,7 @@ import os
 import sys
 import json
 import logging
+from typing import Any, Dict, Optional, Union
 from fastmcp import FastMCP
 from serpapi import GoogleSearch
 
@@ -186,11 +187,11 @@ def search_products(query: str, max_results: int = 10) -> str:
 
 
 def run_server(
-    transport: str | None = None,
-    host: str | None = None,
-    port: int | str | None = None,
-    json_response: bool | None = None,
-    stateless_http: bool | None = None,
+    transport: Optional[str] = None,
+    host: Optional[str] = None,
+    port: Optional[Union[int, str]] = None,
+    json_response: Optional[bool] = None,
+    stateless_http: Optional[bool] = None,
 ) -> None:
     """Run the MCP server with optional overrides from CLI or environment."""
     if transport is None:
