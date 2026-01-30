@@ -19,7 +19,18 @@ from weather_service.graph import get_graph, get_mcpclient
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
+# OpenInference instrumentation for Phoenix compatibility
 LangChainInstrumentor().instrument()
+
+# OpenTelemetry GenAI semantic convention instrumentation for MLflow compatibility
+# Emits spans with gen_ai.* attributes that get transformed to OpenInference format
+# by the OTEL Collector transform processor before being sent to MLflow
+try:
+    from opentelemetry.instrumentation.openai import OpenAIInstrumentor
+    OpenAIInstrumentor().instrument()
+    logger.info("OpenTelemetry GenAI (OpenAI) instrumentation enabled")
+except ImportError:
+    logger.warning("opentelemetry-instrumentation-openai not available, skipping GenAI instrumentation")
 
 
 def get_agent_card(host: str, port: int):

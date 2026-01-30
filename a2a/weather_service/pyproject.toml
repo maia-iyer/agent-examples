@@ -19,6 +19,9 @@ dependencies = [
     "langchain-mcp-adapters>=0.1.0",
     "python-keycloak>=5.5.1",
     "opentelemetry-exporter-otlp",
+    # OpenTelemetry GenAI semantic convention instrumentation
+    # Emits spans with gen_ai.* attributes for MLflow compatibility
+    "opentelemetry-instrumentation-openai>=0.34b0",
 ]
 
 [project.scripts]
