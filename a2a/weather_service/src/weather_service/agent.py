@@ -12,9 +12,13 @@ from a2a.server.tasks import InMemoryTaskStore, TaskUpdater
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill, TaskState, TextPart
 from a2a.utils import new_agent_text_message, new_task
 from openinference.instrumentation.langchain import LangChainInstrumentor
+from opentelemetry import trace
 from langchain_core.messages import HumanMessage
 
 from weather_service.graph import get_graph, get_mcpclient
+
+# Get a tracer for adding context_id to spans
+tracer = trace.get_tracer(__name__)
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -115,6 +119,20 @@ class WeatherExecutor(AgentExecutor):
         task_updater = TaskUpdater(event_queue, task.id, task.context_id)
         event_emitter = A2AEvent(task_updater)
 
+        # Add A2A context to current span for MLflow session tracking
+        current_span = trace.get_current_span()
+        if current_span and current_span.is_recording():
+            # Add context_id for session/conversation grouping in MLflow
+            if task.context_id:
+                current_span.set_attribute("a2a.context_id", task.context_id)
+            if task.id:
+                current_span.set_attribute("a2a.task_id", task.id)
+            # Add user input for trace visibility
+            user_input = context.get_user_input()
+            if user_input:
+                current_span.set_attribute("a2a.user_input", user_input[:500])
+            logger.info(f"Added A2A context to span: context_id={task.context_id}, task_id={task.id}")
+
         # Parse Messages
         messages = [HumanMessage(content=context.get_user_input())]
         input = {"messages": messages}
@@ -122,39 +140,56 @@ class WeatherExecutor(AgentExecutor):
 
         task_updater = TaskUpdater(event_queue, task.id, task.context_id)
 
-        try:
-            output = None
-            # Test MCP connection first
-            logger.info(f'Attempting to connect to MCP server at: {os.getenv("MCP_URL", "http://localhost:8000/sse")}')
-
-            mcpclient = get_mcpclient()
-
-            # Try to get tools to verify connection
+        # Create a traced span for the weather agent execution with A2A context
+        with tracer.start_as_current_span(
+            "weather_agent.execute",
+            attributes={
+                "a2a.context_id": task.context_id or "",
+                "a2a.task_id": task.id or "",
+                "a2a.user_input": context.get_user_input()[:500] if context.get_user_input() else "",
+                "service.name": "weather-service",
+            }
+        ) as span:
             try:
-                tools = await mcpclient.get_tools()
-                logger.info(f'Successfully connected to MCP server. Available tools: {[tool.name for tool in tools]}')
-            except Exception as tool_error:
-                logger.error(f'Failed to connect to MCP server: {tool_error}')
-                await event_emitter.emit_event(f"Error: Cannot connect to MCP weather service at {os.getenv('MCP_URL', 'http://localhost:8000/sse')}. Please ensure the weather MCP server is running. Error: {tool_error}", failed=True)
-                return
+                output = None
+                # Test MCP connection first
+                logger.info(f'Attempting to connect to MCP server at: {os.getenv("MCP_URL", "http://localhost:8000/sse")}')
 
-            graph = await get_graph(mcpclient)
-            async for event in graph.astream(input, stream_mode="updates"):
-                await event_emitter.emit_event(
-                    "\n".join(
-                        f"🚶‍♂️{key}: {str(value)[:256] + '...' if len(str(value)) > 256 else str(value)}"
-                        for key, value in event.items()
+                mcpclient = get_mcpclient()
+
+                # Try to get tools to verify connection
+                try:
+                    tools = await mcpclient.get_tools()
+                    logger.info(f'Successfully connected to MCP server. Available tools: {[tool.name for tool in tools]}')
+                except Exception as tool_error:
+                    logger.error(f'Failed to connect to MCP server: {tool_error}')
+                    span.set_attribute("error", True)
+                    span.set_attribute("error.message", str(tool_error))
+                    await event_emitter.emit_event(f"Error: Cannot connect to MCP weather service at {os.getenv('MCP_URL', 'http://localhost:8000/sse')}. Please ensure the weather MCP server is running. Error: {tool_error}", failed=True)
+                    return
+
+                graph = await get_graph(mcpclient)
+                async for event in graph.astream(input, stream_mode="updates"):
+                    await event_emitter.emit_event(
+                        "\n".join(
+                            f"🚶‍♂️{key}: {str(value)[:256] + '...' if len(str(value)) > 256 else str(value)}"
+                            for key, value in event.items()
+                        )
+                        + "\n"
                     )
-                    + "\n"
-                )
-                output = event
-                logger.info(f'event: {event}')
-            output =  output.get("assistant", {}).get("final_answer")
-            await event_emitter.emit_event(str(output), final=True)
-        except Exception as e:
-            logger.error(f'Graph execution error: {e}')
-            await event_emitter.emit_event(f"Error: Failed to process weather request. {str(e)}", failed=True)
-            raise Exception(str(e))
+                    output = event
+                    logger.info(f'event: {event}')
+                output = output.get("assistant", {}).get("final_answer")
+                # Add response to span for trace visibility
+                if output:
+                    span.set_attribute("a2a.response", str(output)[:500])
+                await event_emitter.emit_event(str(output), final=True)
+            except Exception as e:
+                logger.error(f'Graph execution error: {e}')
+                span.set_attribute("error", True)
+                span.set_attribute("error.message", str(e))
+                await event_emitter.emit_event(f"Error: Failed to process weather request. {str(e)}", failed=True)
+                raise Exception(str(e))
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         """
