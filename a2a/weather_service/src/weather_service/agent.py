@@ -11,7 +11,6 @@ from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.tasks import InMemoryTaskStore, TaskUpdater
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill, TaskState, TextPart
 from a2a.utils import new_agent_text_message, new_task
-from openinference.instrumentation.langchain import LangChainInstrumentor
 from opentelemetry import trace
 from langchain_core.messages import HumanMessage
 
@@ -23,10 +22,9 @@ tracer = trace.get_tracer(__name__)
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-# OpenInference instrumentation for Phoenix compatibility
-LangChainInstrumentor().instrument()
-
-# OpenTelemetry GenAI semantic convention instrumentation for MLflow compatibility
+# OpenTelemetry GenAI semantic convention instrumentation
+# Emits spans with gen_ai.* attributes that get transformed by OTEL Collector
+# to OpenInference format (llm.*) for Phoenix and MLflow session metadata
 # Emits spans with gen_ai.* attributes that get transformed to OpenInference format
 # by the OTEL Collector transform processor before being sent to MLflow
 try:
