@@ -153,6 +153,8 @@ class WeatherExecutor(AgentExecutor):
                 "gen_ai.system": "langchain",
                 # Input message (structured as per GenAI conventions)
                 "gen_ai.prompt": user_input[:500] if user_input else "",
+                # OpenInference format for Phoenix/MLflow compatibility
+                "input.value": user_input[:500] if user_input else "",
             }
         ) as span:
             try:
@@ -188,6 +190,8 @@ class WeatherExecutor(AgentExecutor):
                 # Add response to span using GenAI conventions
                 if output:
                     span.set_attribute("gen_ai.completion", str(output)[:500])
+                    # OpenInference format for Phoenix/MLflow compatibility
+                    span.set_attribute("output.value", str(output)[:500])
                 await event_emitter.emit_event(str(output), final=True)
             except Exception as e:
                 logger.error(f'Graph execution error: {e}')
