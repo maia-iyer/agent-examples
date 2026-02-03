@@ -227,12 +227,15 @@ def run():
     app = server.build()  # this returns a Starlette app
 
     # Add the new agent-card.json path alongside the legacy agent.json path
-    app.routes.insert(0, Route(
-        '/.well-known/agent-card.json',
-        server._handle_get_agent_card,
-        methods=['GET'],
-        name='agent_card_new',
-    ))
+    # Only register this route when JWKS-based authentication is not enabled,
+    # to avoid placing a "public" endpoint behind authentication middleware.
+    if not settings.JWKS_URI:
+        app.routes.insert(0, Route(
+            '/.well-known/agent-card.json',
+            server._handle_get_agent_card,
+            methods=['GET'],
+            name='agent_card_new',
+        ))
 
     if settings.JWKS_URI:
         logging.info("JWKS_URI is set - using JWT Validation middleware")
