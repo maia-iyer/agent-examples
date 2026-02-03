@@ -77,8 +77,8 @@ class BearerAuthBackend(AuthenticationBackend):
 
     """This is run upon every received request"""
     async def authenticate(self, conn):
-        # bypass authentication for agent card
-        if conn.scope.get("path") == "/.well-known/agent.json":
+        # bypass authentication for agent card (both legacy and new paths)
+        if conn.scope.get("path") in ["/.well-known/agent.json", "/.well-known/agent-card.json"]:
             logger.debug("Bypassing authentication for public agent card path")
             return None
         
