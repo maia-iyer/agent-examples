@@ -119,19 +119,21 @@ class WeatherExecutor(AgentExecutor):
         task_updater = TaskUpdater(event_queue, task.id, task.context_id)
         event_emitter = A2AEvent(task_updater)
 
-        # Add A2A context to current span for MLflow session tracking
+        # Add GenAI semantic convention attributes for MLflow session/conversation tracking
+        # See: https://opentelemetry.io/docs/specs/semconv/gen-ai/
         current_span = trace.get_current_span()
         if current_span and current_span.is_recording():
-            # Add context_id for session/conversation grouping in MLflow
+            # GenAI conversation ID for session grouping in MLflow
             if task.context_id:
-                current_span.set_attribute("a2a.context_id", task.context_id)
-            if task.id:
-                current_span.set_attribute("a2a.task_id", task.id)
-            # Add user input for trace visibility
+                current_span.set_attribute("gen_ai.conversation.id", task.context_id)
+            # Agent identification
+            current_span.set_attribute("gen_ai.agent.name", "weather-assistant")
+            current_span.set_attribute("gen_ai.agent.id", task.id or "")
+            # Input message for trace visibility
             user_input = context.get_user_input()
             if user_input:
-                current_span.set_attribute("a2a.user_input", user_input[:500])
-            logger.info(f"Added A2A context to span: context_id={task.context_id}, task_id={task.id}")
+                current_span.set_attribute("gen_ai.request.model", "weather-service")
+            logger.info(f"Added GenAI context to span: conversation.id={task.context_id}")
 
         # Parse Messages
         messages = [HumanMessage(content=context.get_user_input())]
@@ -140,14 +142,19 @@ class WeatherExecutor(AgentExecutor):
 
         task_updater = TaskUpdater(event_queue, task.id, task.context_id)
 
-        # Create a traced span for the weather agent execution with A2A context
+        # Create a traced span for the weather agent execution with GenAI attributes
+        user_input = context.get_user_input()
         with tracer.start_as_current_span(
-            "weather_agent.execute",
+            "gen_ai.agent.invoke",
             attributes={
-                "a2a.context_id": task.context_id or "",
-                "a2a.task_id": task.id or "",
-                "a2a.user_input": context.get_user_input()[:500] if context.get_user_input() else "",
-                "service.name": "weather-service",
+                # GenAI semantic convention attributes
+                "gen_ai.conversation.id": task.context_id or "",
+                "gen_ai.agent.name": "weather-assistant",
+                "gen_ai.agent.id": task.id or "",
+                "gen_ai.request.model": "weather-service",
+                "gen_ai.system": "langchain",
+                # Input message (structured as per GenAI conventions)
+                "gen_ai.prompt": user_input[:500] if user_input else "",
             }
         ) as span:
             try:
@@ -180,9 +187,9 @@ class WeatherExecutor(AgentExecutor):
                     output = event
                     logger.info(f'event: {event}')
                 output = output.get("assistant", {}).get("final_answer")
-                # Add response to span for trace visibility
+                # Add response to span using GenAI conventions
                 if output:
-                    span.set_attribute("a2a.response", str(output)[:500])
+                    span.set_attribute("gen_ai.completion", str(output)[:500])
                 await event_emitter.emit_event(str(output), final=True)
             except Exception as e:
                 logger.error(f'Graph execution error: {e}')
