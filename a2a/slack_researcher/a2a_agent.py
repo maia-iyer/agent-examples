@@ -21,6 +21,7 @@ from a2a.types import AgentCapabilities, AgentCard, AgentSkill, TaskState, TextP
 from a2a.utils import new_agent_text_message, new_task
 
 from starlette.middleware.authentication import AuthenticationMiddleware
+from starlette.routing import Route
 
 from slack_researcher.config import settings, Settings
 from slack_researcher.event import Event
@@ -219,6 +220,15 @@ def run():
     )
 
     app = server.build()  # this returns a Starlette app
+
+    # Add the new agent-card.json path alongside the legacy agent.json path
+    app.routes.insert(0, Route(
+        '/.well-known/agent-card.json',
+        server._handle_get_agent_card,
+        methods=['GET'],
+        name='agent_card_new',
+    ))
+
     # if one of the auth variables is set, create middleware
     # if none of them are set, ignore all authorization headers. No token validation will be performed
     if not settings.JWKS_URI is None:

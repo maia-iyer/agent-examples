@@ -9,6 +9,7 @@ from a2a.server.apps import A2AStarletteApplication
 from a2a.server.events.event_queue import EventQueue
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.tasks import InMemoryTaskStore, TaskUpdater
+from starlette.routing import Route
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill, TaskState, TextPart, DataPart
 from a2a.utils import new_agent_text_message, new_task
 from openinference.instrumentation.langchain import LangChainInstrumentor
@@ -194,4 +195,15 @@ def run():
         agent_card=agent_card,
         http_handler=request_handler,
     )
-    uvicorn.run(server.build(), host="0.0.0.0", port=8000)
+
+    app = server.build()
+
+    # Add the new agent-card.json path alongside the legacy agent.json path
+    app.routes.insert(0, Route(
+        '/.well-known/agent-card.json',
+        server._handle_get_agent_card,
+        methods=['GET'],
+        name='agent_card_new',
+    ))
+
+    uvicorn.run(app, host="0.0.0.0", port=8000)

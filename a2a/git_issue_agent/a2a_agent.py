@@ -23,6 +23,7 @@ from a2a.types import AgentCapabilities, AgentCard, AgentSkill, TaskState, TextP
 from a2a.utils import new_agent_text_message, new_task
 
 from starlette.middleware.authentication import AuthenticationMiddleware
+from starlette.routing import Route
 
 from git_issue_agent.auth import on_auth_error, BearerAuthBackend, auth_headers
 from git_issue_agent.config import settings, Settings
@@ -224,6 +225,18 @@ def run():
     )
 
     app = server.build()  # this returns a Starlette app
+
+    # Add the new agent-card.json path alongside the legacy agent.json path
+    # Only register this route when JWKS-based authentication is not enabled,
+    # to avoid placing a "public" endpoint behind authentication middleware.
+    if not settings.JWKS_URI:
+        app.routes.insert(0, Route(
+            '/.well-known/agent-card.json',
+            server._handle_get_agent_card,
+            methods=['GET'],
+            name='agent_card_new',
+        ))
+
     if settings.JWKS_URI:
         logging.info("JWKS_URI is set - using JWT Validation middleware")
         app.add_middleware(AuthenticationMiddleware, backend=BearerAuthBackend(), on_error=on_auth_error)

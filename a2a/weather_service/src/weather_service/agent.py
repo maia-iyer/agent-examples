@@ -6,6 +6,7 @@ from textwrap import dedent
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.apps import A2AStarletteApplication
 from a2a.server.events.event_queue import EventQueue
+from starlette.routing import Route
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.tasks import InMemoryTaskStore, TaskUpdater
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill, TaskState, TextPart
@@ -166,8 +167,18 @@ def run():
         http_handler=request_handler,
     )
     
-    # Add middleware to log all incoming requests with headers
+    # Build the Starlette app
     app = server.build()
+
+    # Add the new agent-card.json path alongside the legacy agent.json path
+    app.routes.insert(0, Route(
+        '/.well-known/agent-card.json',
+        server._handle_get_agent_card,
+        methods=['GET'],
+        name='agent_card_new',
+    ))
+
+    # Add middleware to log all incoming requests with headers
     
     @app.middleware("http")
     async def log_authorization_header(request, call_next):
