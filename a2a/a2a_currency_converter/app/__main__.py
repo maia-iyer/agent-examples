@@ -9,6 +9,7 @@ import uvicorn
 from a2a.server.apps import A2AStarletteApplication
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.tasks import InMemoryPushNotifier, InMemoryTaskStore
+from starlette.routing import Route
 from a2a.types import (
     AgentCapabilities,
     AgentCard,
@@ -71,7 +72,17 @@ def main(host, port):
             agent_card=agent_card, http_handler=request_handler
         )
 
-        uvicorn.run(server.build(), host=host, port=port)
+        app = server.build()
+
+        # Add the new agent-card.json path alongside the legacy agent.json path
+        app.routes.insert(0, Route(
+            '/.well-known/agent-card.json',
+            server._handle_get_agent_card,
+            methods=['GET'],
+            name='agent_card_new',
+        ))
+
+        uvicorn.run(app, host=host, port=port)
         # --8<-- [end:DefaultRequestHandler]
 
     except MissingAPIKeyError as e:
