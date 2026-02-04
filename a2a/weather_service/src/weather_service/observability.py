@@ -381,6 +381,7 @@ def create_tracing_middleware():
         if request.url.path in ["/health", "/ready", "/.well-known/agent-card.json"]:
             return await call_next(request)
 
+        logger.info(f"🔍 TRACING MIDDLEWARE: Processing {request.url.path}")
         tracer = get_tracer()
 
         # Parse request body to extract user input and context
@@ -406,6 +407,7 @@ def create_tracing_middleware():
         # Without this, the span would inherit parent from W3C Trace Context headers
         empty_ctx = context.Context()
         detach_token = context.attach(empty_ctx)
+        logger.info("🔍 TRACING MIDDLEWARE: Attached empty context to break parent chain")
 
         try:
             # Create root span with MLflow/GenAI attributes
@@ -413,6 +415,8 @@ def create_tracing_middleware():
                 "gen_ai.agent.invoke",
                 kind=SpanKind.SERVER,
             ) as span:
+                span_ctx = span.get_span_context()
+                logger.info(f"🔍 TRACING MIDDLEWARE: Created root span trace_id={format(span_ctx.trace_id, '032x')} span_id={format(span_ctx.span_id, '016x')}")
                 # Set input attributes
                 if user_input:
                     span.set_attribute("gen_ai.prompt", user_input[:1000])
