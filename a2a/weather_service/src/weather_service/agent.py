@@ -14,7 +14,7 @@ from a2a.utils import new_agent_text_message, new_task
 from langchain_core.messages import HumanMessage
 
 from weather_service.graph import get_graph, get_mcpclient
-from weather_service.observability import enrich_current_span
+from weather_service.observability import enrich_current_span, set_span_output
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -147,10 +147,9 @@ class WeatherExecutor(AgentExecutor):
                 logger.info(f'event: {event}')
             output = output.get("assistant", {}).get("final_answer")
 
-            # Add response to span using GenAI/OpenInference conventions
+            # Add response to span using GenAI/OpenInference/MLflow conventions
             if output:
-                span.set_attribute("gen_ai.completion", str(output)[:1000])
-                span.set_attribute("output.value", str(output)[:1000])
+                set_span_output(span, output)
 
             await event_emitter.emit_event(str(output), final=True)
 

@@ -118,10 +118,11 @@ def enrich_current_span(
     input_text: Optional[str] = None,
 ):
     """
-    Enrich the current span (e.g., A2A root span) with GenAI attributes.
+    Enrich the current span (e.g., A2A root span) with GenAI and MLflow attributes.
 
     This modifies the EXISTING span rather than creating a new one.
-    Use this to add GenAI semantic conventions to A2A framework spans.
+    Adds all attributes needed for MLflow trace visualization directly,
+    bypassing the need for OTEL Collector transforms.
 
     Args:
         context_id: A2A context_id (becomes gen_ai.conversation.id)
@@ -131,10 +132,17 @@ def enrich_current_span(
 
     Yields:
         The current span (call span.set_attribute for output after work completes)
+
+    Note:
+        TODO: The following could be handled by OTEL Collector transform instead:
+        - mlflow.spanInputs/spanOutputs (currently set explicitly for reliability)
+        - mlflow.spanType classification (could use span name pattern matching)
+        - mlflow.user/source (could be derived from resource attributes)
     """
     span = trace.get_current_span()
 
-    # Add GenAI semantic conventions to existing span
+    # === GenAI Semantic Conventions ===
+    # These are the standard OTEL GenAI attributes
     if context_id:
         span.set_attribute("gen_ai.conversation.id", context_id)
     if input_text:
@@ -150,6 +158,30 @@ def enrich_current_span(
             OpenInferenceSpanKindValues.AGENT.value
         )
 
+    # === MLflow-specific Attributes ===
+    # These enable MLflow trace UI columns (Request, Response, User, etc.)
+    # TODO: Could be handled by OTEL Collector transform/genai_to_mlflow
+
+    # MLflow span inputs (for Request column)
+    if input_text:
+        span.set_attribute("mlflow.spanInputs", input_text[:1000])
+
+    # MLflow span type (for trace visualization)
+    span.set_attribute("mlflow.spanType", "AGENT")
+
+    # MLflow trace metadata (for trace list columns)
+    # Note: These are span attributes; MLflow expects some as resource attributes
+    # but OTEL Collector can copy them or MLflow may accept span attributes too
+    span.set_attribute("mlflow.traceName", "weather-assistant")
+    if user_id:
+        span.set_attribute("mlflow.user", user_id)
+        span.set_attribute("enduser.id", user_id)
+    span.set_attribute("mlflow.source", "weather-service")
+
+    # MLflow session tracking (for Sessions tab grouping)
+    if context_id:
+        span.set_attribute("mlflow.trace.session", context_id)
+
     # Custom attributes for debugging
     if task_id:
         span.set_attribute("a2a.task_id", task_id)
@@ -162,6 +194,47 @@ def enrich_current_span(
         span.set_status(Status(StatusCode.ERROR, str(e)))
         span.record_exception(e)
         raise
+
+
+def set_span_output(span, output: str):
+    """
+    Set output attributes on a span after work completes.
+
+    Call this after getting a response to populate:
+    - gen_ai.completion (standard GenAI attribute)
+    - output.value (OpenInference attribute)
+    - mlflow.spanOutputs (MLflow Response column)
+
+    Args:
+        span: The span to update
+        output: The output/response text
+    """
+    if output:
+        truncated = str(output)[:1000]
+        span.set_attribute("gen_ai.completion", truncated)
+        span.set_attribute("output.value", truncated)
+        span.set_attribute("mlflow.spanOutputs", truncated)
+
+
+def set_token_usage(span, input_tokens: int = 0, output_tokens: int = 0):
+    """
+    Set token usage attributes on a span.
+
+    Args:
+        span: The span to update
+        input_tokens: Number of input tokens
+        output_tokens: Number of output tokens
+
+    Note:
+        TODO: This could be handled by OTEL Collector transform copying
+        gen_ai.usage.* to mlflow.span.chat_usage.* attributes.
+    """
+    if input_tokens:
+        span.set_attribute("gen_ai.usage.input_tokens", input_tokens)
+        span.set_attribute("mlflow.span.chat_usage.input_tokens", input_tokens)
+    if output_tokens:
+        span.set_attribute("gen_ai.usage.output_tokens", output_tokens)
+        span.set_attribute("mlflow.span.chat_usage.output_tokens", output_tokens)
 
 
 @contextmanager
