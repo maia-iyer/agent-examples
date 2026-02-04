@@ -12,7 +12,7 @@ from a2a.server.tasks import InMemoryTaskStore, TaskUpdater
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill, TaskState, TextPart
 from a2a.utils import new_agent_text_message, new_task
 from opentelemetry import trace, context as otel_context
-from opentelemetry.trace import Link, INVALID_SPAN_CONTEXT
+from opentelemetry.trace import Link, INVALID_SPAN
 from langchain_core.messages import HumanMessage
 
 from weather_service.graph import get_graph, get_mcpclient
@@ -137,9 +137,9 @@ class WeatherExecutor(AgentExecutor):
         parent_context = parent_span.get_span_context() if parent_span else None
         links = [Link(parent_context)] if parent_context and parent_context.is_valid else []
 
-        # Create a NEW trace by using an empty context (no parent)
-        # This makes our span the ROOT span
-        empty_context = otel_context.Context()
+        # Create a NEW trace by using a context with INVALID_SPAN
+        # This forces the tracer to create a new root span with a new trace_id
+        empty_context = trace.set_span_in_context(INVALID_SPAN)
 
         with tracer.start_as_current_span(
             "gen_ai.agent.invoke",
