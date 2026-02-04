@@ -2,11 +2,13 @@
 OpenTelemetry observability setup for Weather Agent.
 
 Key Features:
+- Tracing middleware for root span with MLflow attributes
 - Auto-instrumentation of LangChain with OpenInference
-- `create_agent_span` for creating root AGENT spans
+- Resource attributes for static agent metadata
 - W3C Trace Context propagation for distributed tracing
 """
 
+import json
 import logging
 import os
 from typing import Dict, Any, Optional
@@ -14,14 +16,19 @@ from contextlib import contextmanager
 from opentelemetry import trace, context
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.sdk.resources import Resource
-from opentelemetry.trace import Status, StatusCode
+from opentelemetry.sdk.resources import Resource, SERVICE_NAME, SERVICE_VERSION
+from opentelemetry.trace import Status, StatusCode, SpanKind
 from opentelemetry.propagate import set_global_textmap, extract
 from opentelemetry.propagators.composite import CompositePropagator
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 from opentelemetry.baggage.propagation import W3CBaggagePropagator
 
 logger = logging.getLogger(__name__)
+
+# Agent metadata (static, used in Resource and spans)
+AGENT_NAME = "weather-assistant"
+AGENT_VERSION = "1.0.0"
+AGENT_FRAMEWORK = "langchain"
 
 # OpenInference semantic conventions
 try:
@@ -60,11 +67,23 @@ def setup_observability() -> None:
     logger.info(f"  OTLP Endpoint: {otlp_endpoint}")
     logger.info("=" * 60)
 
-    # Create resource with service attributes
+    # Create resource with service and MLflow attributes
+    # Resource attributes are STATIC and apply to ALL spans/traces
+    # See: https://mlflow.org/docs/latest/genai/tracing/opentelemetry/
     resource = Resource(attributes={
-        "service.name": service_name,
+        # Standard OTEL service attributes
+        SERVICE_NAME: service_name,
+        SERVICE_VERSION: AGENT_VERSION,
         "service.namespace": namespace,
         "k8s.namespace.name": namespace,
+        # MLflow static metadata (applies to all traces)
+        # These appear in MLflow trace list columns
+        "mlflow.traceName": AGENT_NAME,
+        "mlflow.source": service_name,
+        # GenAI static attributes
+        "gen_ai.agent.name": AGENT_NAME,
+        "gen_ai.agent.version": AGENT_VERSION,
+        "gen_ai.system": AGENT_FRAMEWORK,
     })
 
     # Create and configure tracer provider
@@ -336,3 +355,130 @@ def trace_context_from_headers(headers: Dict[str, str]):
         yield ctx
     finally:
         context.detach(token)
+
+
+def create_tracing_middleware():
+    """
+    Create Starlette middleware that wraps all requests in a root tracing span.
+
+    This middleware:
+    1. Creates a root span BEFORE A2A handlers run
+    2. Sets MLflow/GenAI attributes on the root span
+    3. Parses A2A JSON-RPC request to extract user input
+    4. Captures response to set output attributes
+
+    Usage in agent.py:
+        from weather_service.observability import create_tracing_middleware
+        app = server.build()
+        app.add_middleware(BaseHTTPMiddleware, dispatch=create_tracing_middleware())
+    """
+    from starlette.requests import Request
+    from starlette.responses import Response, StreamingResponse
+    import io
+
+    async def tracing_middleware(request: Request, call_next):
+        # Skip non-API paths (health checks, agent card, etc.)
+        if request.url.path in ["/health", "/ready", "/.well-known/agent-card.json"]:
+            return await call_next(request)
+
+        tracer = get_tracer()
+
+        # Parse request body to extract user input and context
+        user_input = None
+        context_id = None
+        task_id = None
+
+        try:
+            body = await request.body()
+            if body:
+                data = json.loads(body)
+                # A2A JSON-RPC format: params.message.parts[0].text
+                params = data.get("params", {})
+                message = params.get("message", {})
+                parts = message.get("parts", [])
+                if parts and isinstance(parts, list):
+                    user_input = parts[0].get("text", "")
+                context_id = params.get("contextId") or message.get("contextId")
+        except Exception as e:
+            logger.debug(f"Could not parse request body: {e}")
+
+        # Create root span with MLflow/GenAI attributes
+        with tracer.start_as_current_span(
+            "gen_ai.agent.invoke",
+            kind=SpanKind.SERVER,
+        ) as span:
+            # Set input attributes
+            if user_input:
+                span.set_attribute("gen_ai.prompt", user_input[:1000])
+                span.set_attribute("input.value", user_input[:1000])
+                span.set_attribute("mlflow.spanInputs", user_input[:1000])
+
+            if context_id:
+                span.set_attribute("gen_ai.conversation.id", context_id)
+                span.set_attribute("mlflow.trace.session", context_id)
+
+            # Set static attributes
+            span.set_attribute("mlflow.spanType", "AGENT")
+            span.set_attribute("gen_ai.agent.name", AGENT_NAME)
+            span.set_attribute("gen_ai.system", AGENT_FRAMEWORK)
+
+            if OPENINFERENCE_AVAILABLE:
+                span.set_attribute(
+                    SpanAttributes.OPENINFERENCE_SPAN_KIND,
+                    OpenInferenceSpanKindValues.AGENT.value,
+                )
+
+            try:
+                # Call the next handler (A2A)
+                response = await call_next(request)
+
+                # Try to capture response for output attributes
+                # Note: This only works for non-streaming responses
+                if isinstance(response, Response) and not isinstance(
+                    response, StreamingResponse
+                ):
+                    try:
+                        # Read response body
+                        response_body = b""
+                        async for chunk in response.body_iterator:
+                            response_body += chunk
+
+                        # Parse and extract output
+                        if response_body:
+                            resp_data = json.loads(response_body)
+                            result = resp_data.get("result", {})
+                            artifacts = result.get("artifacts", [])
+                            if artifacts:
+                                parts = artifacts[0].get("parts", [])
+                                if parts:
+                                    output_text = parts[0].get("text", "")
+                                    if output_text:
+                                        span.set_attribute(
+                                            "gen_ai.completion", output_text[:1000]
+                                        )
+                                        span.set_attribute(
+                                            "output.value", output_text[:1000]
+                                        )
+                                        span.set_attribute(
+                                            "mlflow.spanOutputs", output_text[:1000]
+                                        )
+
+                        # Recreate response with the body
+                        return Response(
+                            content=response_body,
+                            status_code=response.status_code,
+                            headers=dict(response.headers),
+                            media_type=response.media_type,
+                        )
+                    except Exception as e:
+                        logger.debug(f"Could not parse response body: {e}")
+
+                span.set_status(Status(StatusCode.OK))
+                return response
+
+            except Exception as e:
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                span.record_exception(e)
+                raise
+
+    return tracing_middleware
