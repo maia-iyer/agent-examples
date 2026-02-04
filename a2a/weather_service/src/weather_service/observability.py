@@ -386,6 +386,7 @@ def create_tracing_middleware():
         # Parse request body to extract user input and context
         user_input = None
         context_id = None
+        message_id = None
 
         try:
             body = await request.body()
@@ -398,6 +399,7 @@ def create_tracing_middleware():
                 if parts and isinstance(parts, list):
                     user_input = parts[0].get("text", "")
                 context_id = params.get("contextId") or message.get("contextId")
+                message_id = message.get("messageId")
         except Exception as e:
             logger.debug(f"Could not parse request body: {e}")
 
@@ -412,19 +414,41 @@ def create_tracing_middleware():
                 "gen_ai.agent.invoke",
                 kind=SpanKind.SERVER,
             ) as span:
-                # Set input attributes
+                # Set input attributes (Prompt column in MLflow)
                 if user_input:
                     span.set_attribute("gen_ai.prompt", user_input[:1000])
                     span.set_attribute("input.value", user_input[:1000])
                     span.set_attribute("mlflow.spanInputs", user_input[:1000])
 
-                if context_id:
-                    span.set_attribute("gen_ai.conversation.id", context_id)
-                    span.set_attribute("mlflow.trace.session", context_id)
+                # Session tracking - use context_id or message_id as fallback
+                session_id = context_id or message_id
 
-                # Set static attributes
+                if session_id:
+                    span.set_attribute("gen_ai.conversation.id", session_id)
+                    span.set_attribute("mlflow.trace.session", session_id)
+                    span.set_attribute("session.id", session_id)
+
+                # MLflow trace metadata (appears in trace list columns)
                 span.set_attribute("mlflow.spanType", "AGENT")
+                span.set_attribute("mlflow.traceName", AGENT_NAME)
+                span.set_attribute("mlflow.runName", f"{AGENT_NAME}-invoke")
+                span.set_attribute("mlflow.source", "weather-service")
+                span.set_attribute("mlflow.version", AGENT_VERSION)
+
+                # User tracking - extract from auth header if available
+                auth_header = request.headers.get("authorization", "")
+                if auth_header:
+                    # For Bearer tokens, we could decode JWT to get user
+                    # For now, just indicate authenticated request
+                    span.set_attribute("mlflow.user", "authenticated")
+                    span.set_attribute("enduser.id", "authenticated")
+                else:
+                    span.set_attribute("mlflow.user", "anonymous")
+                    span.set_attribute("enduser.id", "anonymous")
+
+                # GenAI semantic conventions
                 span.set_attribute("gen_ai.agent.name", AGENT_NAME)
+                span.set_attribute("gen_ai.agent.version", AGENT_VERSION)
                 span.set_attribute("gen_ai.system", AGENT_FRAMEWORK)
 
                 if OPENINFERENCE_AVAILABLE:
