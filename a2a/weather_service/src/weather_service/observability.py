@@ -117,10 +117,14 @@ def create_agent_span(
     task_id: Optional[str] = None,
     user_id: Optional[str] = None,
     input_text: Optional[str] = None,
-    break_parent_chain: bool = True,
+    break_parent_chain: bool = False,
 ):
     """
-    Create an AGENT span that serves as root for LangChain spans.
+    Create an AGENT span with GenAI semantic conventions.
+
+    By default, this preserves the parent chain so the span becomes a child
+    of any existing trace context (e.g., A2A request handling). This enables
+    full distributed tracing visibility in Phoenix/MLflow.
 
     Args:
         name: Span name (use gen_ai.agent.* for MLflow AGENT type detection)
@@ -128,7 +132,8 @@ def create_agent_span(
         task_id: A2A task_id
         user_id: User identifier
         input_text: User input message
-        break_parent_chain: If True, creates a new root span (breaks A2A chain)
+        break_parent_chain: If True, breaks the trace chain (creates isolated root).
+                           Default False to preserve distributed trace visibility.
 
     Yields:
         The span object (set output.value on it before exiting)
@@ -147,7 +152,7 @@ def create_agent_span(
     attributes["gen_ai.agent.name"] = "weather-assistant"
     attributes["gen_ai.system"] = "langchain"
 
-    # OpenInference span kind
+    # OpenInference span kind - marks this as an AGENT span
     if OPENINFERENCE_AVAILABLE:
         attributes[SpanAttributes.OPENINFERENCE_SPAN_KIND] = OpenInferenceSpanKindValues.AGENT.value
 
@@ -157,16 +162,13 @@ def create_agent_span(
     if user_id:
         attributes["user.id"] = user_id
 
-    # Break the parent chain if requested
-    # This makes our span the root, so MLflow sees our attributes
+    # Optional: break the parent chain for isolated traces
     detach_token = None
-
     if break_parent_chain:
-        # Create empty context to break chain
         empty_ctx = context.Context()
         detach_token = context.attach(empty_ctx)
 
-    # Start the span
+    # Start the span - becomes child of current context (A2A span) by default
     with tracer.start_as_current_span(name, attributes=attributes) as span:
         try:
             yield span

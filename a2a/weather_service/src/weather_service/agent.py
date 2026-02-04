@@ -110,14 +110,13 @@ class WeatherExecutor(AgentExecutor):
         input = {"messages": messages}
         logger.info(f'Processing messages: {input}')
 
-        # Create AGENT span that serves as root for LangChain spans
-        # This breaks the A2A trace chain so MLflow sees our span as root
+        # Create AGENT span with GenAI attributes as child of A2A trace
+        # This preserves full distributed trace visibility in Phoenix/MLflow
         with create_agent_span(
             name="gen_ai.agent.invoke",
             context_id=task.context_id,
             task_id=task.id,
             input_text=user_input,
-            break_parent_chain=True,
         ) as span:
             output = None
             # Test MCP connection first
