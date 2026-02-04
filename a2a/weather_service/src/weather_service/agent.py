@@ -11,8 +11,9 @@ from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.tasks import InMemoryTaskStore, TaskUpdater
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill, TaskState, TextPart
 from a2a.utils import new_agent_text_message, new_task
+import contextvars
 from opentelemetry import trace, context as otel_context
-from opentelemetry.trace import Link, SpanContext, TraceFlags, NonRecordingSpan
+from opentelemetry.trace import Link
 from langchain_core.messages import HumanMessage
 
 from weather_service.graph import get_graph, get_mcpclient
@@ -137,16 +138,22 @@ class WeatherExecutor(AgentExecutor):
         parent_context = parent_span.get_span_context() if parent_span else None
         links = [Link(parent_context)] if parent_context and parent_context.is_valid else []
 
-        # Create a completely clean context with no parent span
-        # This forces the tracer to create a new ROOT span with a new trace_id
-        # Note: We use an empty Context() and then detach from current context
-        clean_context = otel_context.Context()
+        # Create a completely clean OTEL context with no parent span
+        # First, detach ALL current OTEL context to break the trace chain
+        # This is necessary because OTEL uses contextvars internally
 
-        # Create a new ROOT span by starting it with a clean context
-        # This forces the tracer to create a new trace_id with no parent
+        # Store the current context token to restore later if needed
+        current_ctx = otel_context.get_current()
+
+        # Create a truly empty context by attaching an empty Context
+        # and getting the token, which we'll use for our span
+        empty_ctx = otel_context.Context()
+        detach_token = otel_context.attach(empty_ctx)
+
+        # Now create the span - it will have no parent because
+        # the current context has no span
         span = tracer.start_span(
             "gen_ai.agent.invoke",
-            context=clean_context,  # New trace - no parent
             links=links,  # Keep link to A2A span for debugging
             attributes={
                 # GenAI semantic convention attributes
@@ -215,9 +222,11 @@ class WeatherExecutor(AgentExecutor):
             await event_emitter.emit_event(f"Error: Failed to process weather request. {str(e)}", failed=True)
             raise Exception(str(e))
         finally:
-            # Always end the span and detach the context
+            # Always end the span and restore the original context
             span.end()
             otel_context.detach(token)
+            # Restore the original A2A context
+            otel_context.detach(detach_token)
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         """
