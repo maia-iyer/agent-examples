@@ -14,7 +14,7 @@ from a2a.utils import new_agent_text_message, new_task
 from langchain_core.messages import HumanMessage
 
 from weather_service.graph import get_graph, get_mcpclient
-from weather_service.observability import create_agent_span
+from weather_service.observability import enrich_current_span
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -110,10 +110,9 @@ class WeatherExecutor(AgentExecutor):
         input = {"messages": messages}
         logger.info(f'Processing messages: {input}')
 
-        # Create AGENT span with GenAI attributes as child of A2A trace
-        # This preserves full distributed trace visibility in Phoenix/MLflow
-        with create_agent_span(
-            name="gen_ai.agent.invoke",
+        # Enrich the current (A2A) span with GenAI attributes
+        # This modifies the existing root span instead of creating a new child
+        with enrich_current_span(
             context_id=task.context_id,
             task_id=task.id,
             input_text=user_input,

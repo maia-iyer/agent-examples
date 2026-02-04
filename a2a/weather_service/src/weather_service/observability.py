@@ -111,6 +111,60 @@ def get_tracer() -> trace.Tracer:
 
 
 @contextmanager
+def enrich_current_span(
+    context_id: Optional[str] = None,
+    task_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    input_text: Optional[str] = None,
+):
+    """
+    Enrich the current span (e.g., A2A root span) with GenAI attributes.
+
+    This modifies the EXISTING span rather than creating a new one.
+    Use this to add GenAI semantic conventions to A2A framework spans.
+
+    Args:
+        context_id: A2A context_id (becomes gen_ai.conversation.id)
+        task_id: A2A task_id
+        user_id: User identifier
+        input_text: User input message
+
+    Yields:
+        The current span (call span.set_attribute for output after work completes)
+    """
+    span = trace.get_current_span()
+
+    # Add GenAI semantic conventions to existing span
+    if context_id:
+        span.set_attribute("gen_ai.conversation.id", context_id)
+    if input_text:
+        span.set_attribute("gen_ai.prompt", input_text[:1000])
+        span.set_attribute("input.value", input_text[:1000])
+    span.set_attribute("gen_ai.agent.name", "weather-assistant")
+    span.set_attribute("gen_ai.system", "langchain")
+
+    # OpenInference span kind - marks this as an AGENT span
+    if OPENINFERENCE_AVAILABLE:
+        span.set_attribute(
+            SpanAttributes.OPENINFERENCE_SPAN_KIND,
+            OpenInferenceSpanKindValues.AGENT.value
+        )
+
+    # Custom attributes for debugging
+    if task_id:
+        span.set_attribute("a2a.task_id", task_id)
+    if user_id:
+        span.set_attribute("user.id", user_id)
+
+    try:
+        yield span
+    except Exception as e:
+        span.set_status(Status(StatusCode.ERROR, str(e)))
+        span.record_exception(e)
+        raise
+
+
+@contextmanager
 def create_agent_span(
     name: str = "gen_ai.agent.invoke",
     context_id: Optional[str] = None,
@@ -120,11 +174,10 @@ def create_agent_span(
     break_parent_chain: bool = False,
 ):
     """
-    Create an AGENT span with GenAI semantic conventions.
+    Create a NEW AGENT span with GenAI semantic conventions.
 
-    By default, this preserves the parent chain so the span becomes a child
-    of any existing trace context (e.g., A2A request handling). This enables
-    full distributed tracing visibility in Phoenix/MLflow.
+    Use `enrich_current_span` instead if you want to add attributes to
+    the existing A2A span rather than creating a new child span.
 
     Args:
         name: Span name (use gen_ai.agent.* for MLflow AGENT type detection)
