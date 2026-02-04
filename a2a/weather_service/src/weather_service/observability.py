@@ -402,83 +402,92 @@ def create_tracing_middleware():
         except Exception as e:
             logger.debug(f"Could not parse request body: {e}")
 
-        # Create root span with MLflow/GenAI attributes
-        with tracer.start_as_current_span(
-            "gen_ai.agent.invoke",
-            kind=SpanKind.SERVER,
-        ) as span:
-            # Set input attributes
-            if user_input:
-                span.set_attribute("gen_ai.prompt", user_input[:1000])
-                span.set_attribute("input.value", user_input[:1000])
-                span.set_attribute("mlflow.spanInputs", user_input[:1000])
+        # Break parent chain to make this a true root span
+        # Without this, the span would inherit parent from W3C Trace Context headers
+        empty_ctx = context.Context()
+        detach_token = context.attach(empty_ctx)
 
-            if context_id:
-                span.set_attribute("gen_ai.conversation.id", context_id)
-                span.set_attribute("mlflow.trace.session", context_id)
+        try:
+            # Create root span with MLflow/GenAI attributes
+            with tracer.start_as_current_span(
+                "gen_ai.agent.invoke",
+                kind=SpanKind.SERVER,
+            ) as span:
+                # Set input attributes
+                if user_input:
+                    span.set_attribute("gen_ai.prompt", user_input[:1000])
+                    span.set_attribute("input.value", user_input[:1000])
+                    span.set_attribute("mlflow.spanInputs", user_input[:1000])
 
-            # Set static attributes
-            span.set_attribute("mlflow.spanType", "AGENT")
-            span.set_attribute("gen_ai.agent.name", AGENT_NAME)
-            span.set_attribute("gen_ai.system", AGENT_FRAMEWORK)
+                if context_id:
+                    span.set_attribute("gen_ai.conversation.id", context_id)
+                    span.set_attribute("mlflow.trace.session", context_id)
 
-            if OPENINFERENCE_AVAILABLE:
-                span.set_attribute(
-                    SpanAttributes.OPENINFERENCE_SPAN_KIND,
-                    OpenInferenceSpanKindValues.AGENT.value,
-                )
+                # Set static attributes
+                span.set_attribute("mlflow.spanType", "AGENT")
+                span.set_attribute("gen_ai.agent.name", AGENT_NAME)
+                span.set_attribute("gen_ai.system", AGENT_FRAMEWORK)
 
-            try:
-                # Call the next handler (A2A)
-                response = await call_next(request)
+                if OPENINFERENCE_AVAILABLE:
+                    span.set_attribute(
+                        SpanAttributes.OPENINFERENCE_SPAN_KIND,
+                        OpenInferenceSpanKindValues.AGENT.value,
+                    )
 
-                # Try to capture response for output attributes
-                # Note: This only works for non-streaming responses
-                if isinstance(response, Response) and not isinstance(
-                    response, StreamingResponse
-                ):
-                    try:
-                        # Read response body
-                        response_body = b""
-                        async for chunk in response.body_iterator:
-                            response_body += chunk
+                try:
+                    # Call the next handler (A2A)
+                    response = await call_next(request)
 
-                        # Parse and extract output
-                        if response_body:
-                            resp_data = json.loads(response_body)
-                            result = resp_data.get("result", {})
-                            artifacts = result.get("artifacts", [])
-                            if artifacts:
-                                parts = artifacts[0].get("parts", [])
-                                if parts:
-                                    output_text = parts[0].get("text", "")
-                                    if output_text:
-                                        span.set_attribute(
-                                            "gen_ai.completion", output_text[:1000]
-                                        )
-                                        span.set_attribute(
-                                            "output.value", output_text[:1000]
-                                        )
-                                        span.set_attribute(
-                                            "mlflow.spanOutputs", output_text[:1000]
-                                        )
+                    # Try to capture response for output attributes
+                    # Note: This only works for non-streaming responses
+                    if isinstance(response, Response) and not isinstance(
+                        response, StreamingResponse
+                    ):
+                        try:
+                            # Read response body
+                            response_body = b""
+                            async for chunk in response.body_iterator:
+                                response_body += chunk
 
-                        # Recreate response with the body
-                        return Response(
-                            content=response_body,
-                            status_code=response.status_code,
-                            headers=dict(response.headers),
-                            media_type=response.media_type,
-                        )
-                    except Exception as e:
-                        logger.debug(f"Could not parse response body: {e}")
+                            # Parse and extract output
+                            if response_body:
+                                resp_data = json.loads(response_body)
+                                result = resp_data.get("result", {})
+                                artifacts = result.get("artifacts", [])
+                                if artifacts:
+                                    parts = artifacts[0].get("parts", [])
+                                    if parts:
+                                        output_text = parts[0].get("text", "")
+                                        if output_text:
+                                            span.set_attribute(
+                                                "gen_ai.completion", output_text[:1000]
+                                            )
+                                            span.set_attribute(
+                                                "output.value", output_text[:1000]
+                                            )
+                                            span.set_attribute(
+                                                "mlflow.spanOutputs", output_text[:1000]
+                                            )
 
-                span.set_status(Status(StatusCode.OK))
-                return response
+                            # Recreate response with the body
+                            return Response(
+                                content=response_body,
+                                status_code=response.status_code,
+                                headers=dict(response.headers),
+                                media_type=response.media_type,
+                            )
+                        except Exception as e:
+                            logger.debug(f"Could not parse response body: {e}")
 
-            except Exception as e:
-                span.set_status(Status(StatusCode.ERROR, str(e)))
-                span.record_exception(e)
-                raise
+                    span.set_status(Status(StatusCode.OK))
+                    return response
+
+                except Exception as e:
+                    span.set_status(Status(StatusCode.ERROR, str(e)))
+                    span.record_exception(e)
+                    raise
+        finally:
+            # Always detach the context to restore parent chain for other requests
+            context.detach(detach_token)
 
     return tracing_middleware
