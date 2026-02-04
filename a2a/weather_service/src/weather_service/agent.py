@@ -11,7 +11,8 @@ from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.tasks import InMemoryTaskStore, TaskUpdater
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill, TaskState, TextPart
 from a2a.utils import new_agent_text_message, new_task
-from opentelemetry import trace
+from opentelemetry import trace, context as otel_context
+from opentelemetry.trace import Link, INVALID_SPAN_CONTEXT
 from langchain_core.messages import HumanMessage
 
 from weather_service.graph import get_graph, get_mcpclient
@@ -117,33 +118,33 @@ class WeatherExecutor(AgentExecutor):
         task_updater = TaskUpdater(event_queue, task.id, task.context_id)
         event_emitter = A2AEvent(task_updater)
 
-        # Add GenAI semantic convention attributes for MLflow session/conversation tracking
-        # See: https://opentelemetry.io/docs/specs/semconv/gen-ai/
-        current_span = trace.get_current_span()
-        if current_span and current_span.is_recording():
-            # GenAI conversation ID for session grouping in MLflow
-            if task.context_id:
-                current_span.set_attribute("gen_ai.conversation.id", task.context_id)
-            # Agent identification
-            current_span.set_attribute("gen_ai.agent.name", "weather-assistant")
-            current_span.set_attribute("gen_ai.agent.id", task.id or "")
-            # Input message for trace visibility
-            user_input = context.get_user_input()
-            if user_input:
-                current_span.set_attribute("gen_ai.request.model", "weather-service")
-            logger.info(f"Added GenAI context to span: conversation.id={task.context_id}")
+        # Get user input for the agent
+        user_input = context.get_user_input()
 
         # Parse Messages
-        messages = [HumanMessage(content=context.get_user_input())]
+        messages = [HumanMessage(content=user_input)]
         input = {"messages": messages}
         logger.info(f'Processing messages: {input}')
 
         task_updater = TaskUpdater(event_queue, task.id, task.context_id)
 
-        # Create a traced span for the weather agent execution with GenAI attributes
-        user_input = context.get_user_input()
+        # OPTION A: Break trace chain - create NEW root span for agent
+        # This makes gen_ai.agent.invoke the root span so MLflow UI columns work
+        # The A2A framework spans will be filtered out by OTEL collector
+        #
+        # Get parent span context for linking (preserves relationship for debugging)
+        parent_span = trace.get_current_span()
+        parent_context = parent_span.get_span_context() if parent_span else None
+        links = [Link(parent_context)] if parent_context and parent_context.is_valid else []
+
+        # Create a NEW trace by using an empty context (no parent)
+        # This makes our span the ROOT span
+        empty_context = otel_context.Context()
+
         with tracer.start_as_current_span(
             "gen_ai.agent.invoke",
+            context=empty_context,  # New trace - no parent
+            links=links,  # Keep link to A2A span for debugging
             attributes={
                 # GenAI semantic convention attributes
                 "gen_ai.conversation.id": task.context_id or "",
@@ -155,6 +156,9 @@ class WeatherExecutor(AgentExecutor):
                 "gen_ai.prompt": user_input[:500] if user_input else "",
                 # OpenInference format for Phoenix/MLflow compatibility
                 "input.value": user_input[:500] if user_input else "",
+                # MLflow UI columns - these are now on ROOT span
+                "mlflow.spanInputs": user_input[:500] if user_input else "",
+                "mlflow.spanType": "AGENT",
             }
         ) as span:
             try:
@@ -188,10 +192,13 @@ class WeatherExecutor(AgentExecutor):
                     logger.info(f'event: {event}')
                 output = output.get("assistant", {}).get("final_answer")
                 # Add response to span using GenAI conventions
+                # Now that this span IS the root span, MLflow UI will read from it
                 if output:
                     span.set_attribute("gen_ai.completion", str(output)[:500])
                     # OpenInference format for Phoenix/MLflow compatibility
                     span.set_attribute("output.value", str(output)[:500])
+                    # MLflow UI columns - Response (now on ROOT span)
+                    span.set_attribute("mlflow.spanOutputs", str(output)[:500])
                 await event_emitter.emit_event(str(output), final=True)
             except Exception as e:
                 logger.error(f'Graph execution error: {e}')
