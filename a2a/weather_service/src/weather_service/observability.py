@@ -376,7 +376,11 @@ def create_tracing_middleware():
     from starlette.responses import Response, StreamingResponse
     import io
 
+    print("🔍 TRACING MIDDLEWARE FACTORY: Creating middleware function", flush=True)
+    logger.info("🔍 TRACING MIDDLEWARE FACTORY: Creating middleware function")
+
     async def tracing_middleware(request: Request, call_next):
+        print(f"🔍 TRACING MIDDLEWARE DISPATCH: {request.url.path}", flush=True)
         # Skip non-API paths (health checks, agent card, etc.)
         if request.url.path in ["/health", "/ready", "/.well-known/agent-card.json"]:
             return await call_next(request)
