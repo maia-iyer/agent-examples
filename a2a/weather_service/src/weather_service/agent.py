@@ -11,30 +11,13 @@ from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.tasks import InMemoryTaskStore, TaskUpdater
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill, TaskState, TextPart
 from a2a.utils import new_agent_text_message, new_task
-import contextvars
-from opentelemetry import trace, context as otel_context
-from opentelemetry.trace import Link
 from langchain_core.messages import HumanMessage
 
 from weather_service.graph import get_graph, get_mcpclient
-
-# Get a tracer for adding context_id to spans
-tracer = trace.get_tracer(__name__)
+from weather_service.observability import create_agent_span
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
-
-# OpenTelemetry GenAI semantic convention instrumentation
-# Emits spans with gen_ai.* attributes that get transformed by OTEL Collector
-# to OpenInference format (llm.*) for Phoenix and MLflow session metadata
-# Emits spans with gen_ai.* attributes that get transformed to OpenInference format
-# by the OTEL Collector transform processor before being sent to MLflow
-try:
-    from opentelemetry.instrumentation.openai import OpenAIInstrumentor
-    OpenAIInstrumentor().instrument()
-    logger.info("OpenTelemetry GenAI (OpenAI) instrumentation enabled")
-except ImportError:
-    logger.warning("opentelemetry-instrumentation-openai not available, skipping GenAI instrumentation")
 
 
 def get_agent_card(host: str, port: int):
@@ -127,56 +110,15 @@ class WeatherExecutor(AgentExecutor):
         input = {"messages": messages}
         logger.info(f'Processing messages: {input}')
 
-        task_updater = TaskUpdater(event_queue, task.id, task.context_id)
-
-        # OPTION A: Break trace chain - create NEW root span for agent
-        # This makes gen_ai.agent.invoke the root span so MLflow UI columns work
-        # The A2A framework spans will be filtered out by OTEL collector
-        #
-        # Get parent span context for linking (preserves relationship for debugging)
-        parent_span = trace.get_current_span()
-        parent_context = parent_span.get_span_context() if parent_span else None
-        links = [Link(parent_context)] if parent_context and parent_context.is_valid else []
-
-        # Create a completely clean OTEL context with no parent span
-        # First, detach ALL current OTEL context to break the trace chain
-        # This is necessary because OTEL uses contextvars internally
-
-        # Store the current context token to restore later if needed
-        current_ctx = otel_context.get_current()
-
-        # Create a truly empty context by attaching an empty Context
-        # and getting the token, which we'll use for our span
-        empty_ctx = otel_context.Context()
-        detach_token = otel_context.attach(empty_ctx)
-
-        # Now create the span - it will have no parent because
-        # the current context has no span
-        span = tracer.start_span(
-            "gen_ai.agent.invoke",
-            links=links,  # Keep link to A2A span for debugging
-            attributes={
-                # GenAI semantic convention attributes
-                "gen_ai.conversation.id": task.context_id or "",
-                "gen_ai.agent.name": "weather-assistant",
-                "gen_ai.agent.id": task.id or "",
-                "gen_ai.request.model": "weather-service",
-                "gen_ai.system": "langchain",
-                # Input message (structured as per GenAI conventions)
-                "gen_ai.prompt": user_input[:500] if user_input else "",
-                # OpenInference format for Phoenix/MLflow compatibility
-                "input.value": user_input[:500] if user_input else "",
-                # MLflow UI columns - these are now on ROOT span
-                "mlflow.spanInputs": user_input[:500] if user_input else "",
-                "mlflow.spanType": "AGENT",
-            }
-        )
-
-        # Set this span as the current span so child spans are attached to it
-        ctx = trace.set_span_in_context(span)
-        token = otel_context.attach(ctx)
-
-        try:
+        # Create AGENT span that serves as root for LangChain spans
+        # This breaks the A2A trace chain so MLflow sees our span as root
+        with create_agent_span(
+            name="gen_ai.agent.invoke",
+            context_id=task.context_id,
+            task_id=task.id,
+            input_text=user_input,
+            break_parent_chain=True,
+        ) as span:
             output = None
             # Test MCP connection first
             logger.info(f'Attempting to connect to MCP server at: {os.getenv("MCP_URL", "http://localhost:8000/sse")}')
@@ -206,27 +148,13 @@ class WeatherExecutor(AgentExecutor):
                 output = event
                 logger.info(f'event: {event}')
             output = output.get("assistant", {}).get("final_answer")
-            # Add response to span using GenAI conventions
-            # Now that this span IS the root span, MLflow UI will read from it
+
+            # Add response to span using GenAI/OpenInference conventions
             if output:
-                span.set_attribute("gen_ai.completion", str(output)[:500])
-                # OpenInference format for Phoenix/MLflow compatibility
-                span.set_attribute("output.value", str(output)[:500])
-                # MLflow UI columns - Response (now on ROOT span)
-                span.set_attribute("mlflow.spanOutputs", str(output)[:500])
+                span.set_attribute("gen_ai.completion", str(output)[:1000])
+                span.set_attribute("output.value", str(output)[:1000])
+
             await event_emitter.emit_event(str(output), final=True)
-        except Exception as e:
-            logger.error(f'Graph execution error: {e}')
-            span.set_attribute("error", True)
-            span.set_attribute("error.message", str(e))
-            await event_emitter.emit_event(f"Error: Failed to process weather request. {str(e)}", failed=True)
-            raise Exception(str(e))
-        finally:
-            # Always end the span and restore the original context
-            span.end()
-            otel_context.detach(token)
-            # Restore the original A2A context
-            otel_context.detach(detach_token)
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         """
@@ -249,7 +177,7 @@ def run():
         agent_card=agent_card,
         http_handler=request_handler,
     )
-    
+
     # Build the Starlette app
     app = server.build()
 
@@ -262,7 +190,6 @@ def run():
     ))
 
     # Add middleware to log all incoming requests with headers
-    
     @app.middleware("http")
     async def log_authorization_header(request, call_next):
         auth_header = request.headers.get("authorization", "No Authorization header")
