@@ -12,7 +12,7 @@ from a2a.server.tasks import InMemoryTaskStore, TaskUpdater
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill, TaskState, TextPart
 from a2a.utils import new_agent_text_message, new_task
 from opentelemetry import trace, context as otel_context
-from opentelemetry.trace import Link, INVALID_SPAN
+from opentelemetry.trace import Link, SpanContext, TraceFlags, NonRecordingSpan
 from langchain_core.messages import HumanMessage
 
 from weather_service.graph import get_graph, get_mcpclient
@@ -137,13 +137,16 @@ class WeatherExecutor(AgentExecutor):
         parent_context = parent_span.get_span_context() if parent_span else None
         links = [Link(parent_context)] if parent_context and parent_context.is_valid else []
 
-        # Create a NEW trace by using a context with INVALID_SPAN
-        # This forces the tracer to create a new root span with a new trace_id
-        empty_context = trace.set_span_in_context(INVALID_SPAN)
+        # Create a completely clean context with no parent span
+        # This forces the tracer to create a new ROOT span with a new trace_id
+        # Note: We use an empty Context() and then detach from current context
+        clean_context = otel_context.Context()
 
-        with tracer.start_as_current_span(
+        # Create a new ROOT span by starting it with a clean context
+        # This forces the tracer to create a new trace_id with no parent
+        span = tracer.start_span(
             "gen_ai.agent.invoke",
-            context=empty_context,  # New trace - no parent
+            context=clean_context,  # New trace - no parent
             links=links,  # Keep link to A2A span for debugging
             attributes={
                 # GenAI semantic convention attributes
@@ -160,52 +163,61 @@ class WeatherExecutor(AgentExecutor):
                 "mlflow.spanInputs": user_input[:500] if user_input else "",
                 "mlflow.spanType": "AGENT",
             }
-        ) as span:
+        )
+
+        # Set this span as the current span so child spans are attached to it
+        ctx = trace.set_span_in_context(span)
+        token = otel_context.attach(ctx)
+
+        try:
+            output = None
+            # Test MCP connection first
+            logger.info(f'Attempting to connect to MCP server at: {os.getenv("MCP_URL", "http://localhost:8000/sse")}')
+
+            mcpclient = get_mcpclient()
+
+            # Try to get tools to verify connection
             try:
-                output = None
-                # Test MCP connection first
-                logger.info(f'Attempting to connect to MCP server at: {os.getenv("MCP_URL", "http://localhost:8000/sse")}')
-
-                mcpclient = get_mcpclient()
-
-                # Try to get tools to verify connection
-                try:
-                    tools = await mcpclient.get_tools()
-                    logger.info(f'Successfully connected to MCP server. Available tools: {[tool.name for tool in tools]}')
-                except Exception as tool_error:
-                    logger.error(f'Failed to connect to MCP server: {tool_error}')
-                    span.set_attribute("error", True)
-                    span.set_attribute("error.message", str(tool_error))
-                    await event_emitter.emit_event(f"Error: Cannot connect to MCP weather service at {os.getenv('MCP_URL', 'http://localhost:8000/sse')}. Please ensure the weather MCP server is running. Error: {tool_error}", failed=True)
-                    return
-
-                graph = await get_graph(mcpclient)
-                async for event in graph.astream(input, stream_mode="updates"):
-                    await event_emitter.emit_event(
-                        "\n".join(
-                            f"🚶‍♂️{key}: {str(value)[:256] + '...' if len(str(value)) > 256 else str(value)}"
-                            for key, value in event.items()
-                        )
-                        + "\n"
-                    )
-                    output = event
-                    logger.info(f'event: {event}')
-                output = output.get("assistant", {}).get("final_answer")
-                # Add response to span using GenAI conventions
-                # Now that this span IS the root span, MLflow UI will read from it
-                if output:
-                    span.set_attribute("gen_ai.completion", str(output)[:500])
-                    # OpenInference format for Phoenix/MLflow compatibility
-                    span.set_attribute("output.value", str(output)[:500])
-                    # MLflow UI columns - Response (now on ROOT span)
-                    span.set_attribute("mlflow.spanOutputs", str(output)[:500])
-                await event_emitter.emit_event(str(output), final=True)
-            except Exception as e:
-                logger.error(f'Graph execution error: {e}')
+                tools = await mcpclient.get_tools()
+                logger.info(f'Successfully connected to MCP server. Available tools: {[tool.name for tool in tools]}')
+            except Exception as tool_error:
+                logger.error(f'Failed to connect to MCP server: {tool_error}')
                 span.set_attribute("error", True)
-                span.set_attribute("error.message", str(e))
-                await event_emitter.emit_event(f"Error: Failed to process weather request. {str(e)}", failed=True)
-                raise Exception(str(e))
+                span.set_attribute("error.message", str(tool_error))
+                await event_emitter.emit_event(f"Error: Cannot connect to MCP weather service at {os.getenv('MCP_URL', 'http://localhost:8000/sse')}. Please ensure the weather MCP server is running. Error: {tool_error}", failed=True)
+                return
+
+            graph = await get_graph(mcpclient)
+            async for event in graph.astream(input, stream_mode="updates"):
+                await event_emitter.emit_event(
+                    "\n".join(
+                        f"🚶‍♂️{key}: {str(value)[:256] + '...' if len(str(value)) > 256 else str(value)}"
+                        for key, value in event.items()
+                    )
+                    + "\n"
+                )
+                output = event
+                logger.info(f'event: {event}')
+            output = output.get("assistant", {}).get("final_answer")
+            # Add response to span using GenAI conventions
+            # Now that this span IS the root span, MLflow UI will read from it
+            if output:
+                span.set_attribute("gen_ai.completion", str(output)[:500])
+                # OpenInference format for Phoenix/MLflow compatibility
+                span.set_attribute("output.value", str(output)[:500])
+                # MLflow UI columns - Response (now on ROOT span)
+                span.set_attribute("mlflow.spanOutputs", str(output)[:500])
+            await event_emitter.emit_event(str(output), final=True)
+        except Exception as e:
+            logger.error(f'Graph execution error: {e}')
+            span.set_attribute("error", True)
+            span.set_attribute("error.message", str(e))
+            await event_emitter.emit_event(f"Error: Failed to process weather request. {str(e)}", failed=True)
+            raise Exception(str(e))
+        finally:
+            # Always end the span and detach the context
+            span.end()
+            otel_context.detach(token)
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         """
