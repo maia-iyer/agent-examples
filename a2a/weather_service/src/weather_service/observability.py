@@ -466,13 +466,13 @@ def create_tracing_middleware():
                     if isinstance(response, Response) and not isinstance(
                         response, StreamingResponse
                     ):
-                        try:
-                            # Read response body
-                            response_body = b""
-                            async for chunk in response.body_iterator:
-                                response_body += chunk
+                        # Read response body - we MUST recreate response after this
+                        response_body = b""
+                        async for chunk in response.body_iterator:
+                            response_body += chunk
 
-                            # Parse and extract output
+                        # Try to parse and extract output for MLflow
+                        try:
                             if response_body:
                                 resp_data = json.loads(response_body)
                                 result = resp_data.get("result", {})
@@ -491,17 +491,19 @@ def create_tracing_middleware():
                                             span.set_attribute(
                                                 "mlflow.spanOutputs", output_text[:1000]
                                             )
-
-                            # Recreate response with the body
-                            return Response(
-                                content=response_body,
-                                status_code=response.status_code,
-                                headers=dict(response.headers),
-                                media_type=response.media_type,
-                            )
                         except Exception as e:
                             logger.debug(f"Could not parse response body: {e}")
 
+                        # Always recreate response since we consumed the iterator
+                        span.set_status(Status(StatusCode.OK))
+                        return Response(
+                            content=response_body,
+                            status_code=response.status_code,
+                            headers=dict(response.headers),
+                            media_type=response.media_type,
+                        )
+
+                    # For streaming responses, just return as-is
                     span.set_status(Status(StatusCode.OK))
                     return response
 
