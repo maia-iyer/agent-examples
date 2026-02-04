@@ -110,6 +110,50 @@ def get_tracer() -> trace.Tracer:
     return _tracer
 
 
+def _set_genai_mlflow_attributes(
+    span,
+    context_id: Optional[str] = None,
+    task_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    input_text: Optional[str] = None,
+):
+    """Set GenAI and MLflow attributes on a span."""
+    # === GenAI Semantic Conventions ===
+    if context_id:
+        span.set_attribute("gen_ai.conversation.id", context_id)
+    if input_text:
+        span.set_attribute("gen_ai.prompt", input_text[:1000])
+        span.set_attribute("input.value", input_text[:1000])
+    span.set_attribute("gen_ai.agent.name", "weather-assistant")
+    span.set_attribute("gen_ai.system", "langchain")
+
+    # OpenInference span kind
+    if OPENINFERENCE_AVAILABLE:
+        span.set_attribute(
+            SpanAttributes.OPENINFERENCE_SPAN_KIND,
+            OpenInferenceSpanKindValues.AGENT.value
+        )
+
+    # === MLflow-specific Attributes ===
+    # TODO: Could be handled by OTEL Collector transform/genai_to_mlflow
+    if input_text:
+        span.set_attribute("mlflow.spanInputs", input_text[:1000])
+    span.set_attribute("mlflow.spanType", "AGENT")
+    span.set_attribute("mlflow.traceName", "weather-assistant")
+    span.set_attribute("mlflow.source", "weather-service")
+    if context_id:
+        span.set_attribute("mlflow.trace.session", context_id)
+    if user_id:
+        span.set_attribute("mlflow.user", user_id)
+        span.set_attribute("enduser.id", user_id)
+
+    # Custom attributes
+    if task_id:
+        span.set_attribute("a2a.task_id", task_id)
+    if user_id:
+        span.set_attribute("user.id", user_id)
+
+
 @contextmanager
 def enrich_current_span(
     context_id: Optional[str] = None,
@@ -120,9 +164,8 @@ def enrich_current_span(
     """
     Enrich the current span (e.g., A2A root span) with GenAI and MLflow attributes.
 
-    This modifies the EXISTING span rather than creating a new one.
-    Adds all attributes needed for MLflow trace visualization directly,
-    bypassing the need for OTEL Collector transforms.
+    If there's no recording span in the current context, creates a new one named
+    'gen_ai.agent.invoke' to ensure traces are captured.
 
     Args:
         context_id: A2A context_id (becomes gen_ai.conversation.id)
@@ -131,7 +174,7 @@ def enrich_current_span(
         input_text: User input message
 
     Yields:
-        The current span (call span.set_attribute for output after work completes)
+        The span (either enriched existing or newly created)
 
     Note:
         TODO: The following could be handled by OTEL Collector transform instead:
@@ -139,61 +182,33 @@ def enrich_current_span(
         - mlflow.spanType classification (could use span name pattern matching)
         - mlflow.user/source (could be derived from resource attributes)
     """
-    span = trace.get_current_span()
+    current_span = trace.get_current_span()
 
-    # === GenAI Semantic Conventions ===
-    # These are the standard OTEL GenAI attributes
-    if context_id:
-        span.set_attribute("gen_ai.conversation.id", context_id)
-    if input_text:
-        span.set_attribute("gen_ai.prompt", input_text[:1000])
-        span.set_attribute("input.value", input_text[:1000])
-    span.set_attribute("gen_ai.agent.name", "weather-assistant")
-    span.set_attribute("gen_ai.system", "langchain")
-
-    # OpenInference span kind - marks this as an AGENT span
-    if OPENINFERENCE_AVAILABLE:
-        span.set_attribute(
-            SpanAttributes.OPENINFERENCE_SPAN_KIND,
-            OpenInferenceSpanKindValues.AGENT.value
-        )
-
-    # === MLflow-specific Attributes ===
-    # These enable MLflow trace UI columns (Request, Response, User, etc.)
-    # TODO: Could be handled by OTEL Collector transform/genai_to_mlflow
-
-    # MLflow span inputs (for Request column)
-    if input_text:
-        span.set_attribute("mlflow.spanInputs", input_text[:1000])
-
-    # MLflow span type (for trace visualization)
-    span.set_attribute("mlflow.spanType", "AGENT")
-
-    # MLflow trace metadata (for trace list columns)
-    # Note: These are span attributes; MLflow expects some as resource attributes
-    # but OTEL Collector can copy them or MLflow may accept span attributes too
-    span.set_attribute("mlflow.traceName", "weather-assistant")
-    if user_id:
-        span.set_attribute("mlflow.user", user_id)
-        span.set_attribute("enduser.id", user_id)
-    span.set_attribute("mlflow.source", "weather-service")
-
-    # MLflow session tracking (for Sessions tab grouping)
-    if context_id:
-        span.set_attribute("mlflow.trace.session", context_id)
-
-    # Custom attributes for debugging
-    if task_id:
-        span.set_attribute("a2a.task_id", task_id)
-    if user_id:
-        span.set_attribute("user.id", user_id)
-
-    try:
-        yield span
-    except Exception as e:
-        span.set_status(Status(StatusCode.ERROR, str(e)))
-        span.record_exception(e)
-        raise
+    # Check if we have a recording span to enrich
+    # get_current_span() returns INVALID_SPAN if none exists
+    if current_span.is_recording():
+        # Enrich the existing span
+        _set_genai_mlflow_attributes(current_span, context_id, task_id, user_id, input_text)
+        try:
+            yield current_span
+        except Exception as e:
+            current_span.set_status(Status(StatusCode.ERROR, str(e)))
+            current_span.record_exception(e)
+            raise
+    else:
+        # No recording span - create one
+        # This ensures our GenAI attributes are captured even if A2A doesn't trace
+        logger.info("No current recording span - creating gen_ai.agent.invoke span")
+        tracer = get_tracer()
+        with tracer.start_as_current_span("gen_ai.agent.invoke") as new_span:
+            _set_genai_mlflow_attributes(new_span, context_id, task_id, user_id, input_text)
+            try:
+                yield new_span
+                new_span.set_status(Status(StatusCode.OK))
+            except Exception as e:
+                new_span.set_status(Status(StatusCode.ERROR, str(e)))
+                new_span.record_exception(e)
+                raise
 
 
 def set_span_output(span, output: str):
