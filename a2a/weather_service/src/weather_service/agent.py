@@ -16,6 +16,7 @@ from langchain_core.messages import HumanMessage
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from weather_service.graph import get_graph, get_mcpclient
+from opentelemetry import trace
 from weather_service.observability import create_tracing_middleware, set_span_output
 
 logging.basicConfig(level=logging.DEBUG)
@@ -142,6 +143,13 @@ class WeatherExecutor(AgentExecutor):
             output = event
             logger.info(f'event: {event}')
         output = output.get("assistant", {}).get("final_answer")
+
+        # Set span output BEFORE emitting final event (for streaming response capture)
+        # This populates mlflow.spanOutputs, output.value, gen_ai.completion
+        if output:
+            current_span = trace.get_current_span()
+            if current_span and current_span.is_recording():
+                set_span_output(current_span, str(output))
 
         await event_emitter.emit_event(str(output), final=True)
 
