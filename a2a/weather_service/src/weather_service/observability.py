@@ -11,6 +11,7 @@ Key Features:
 import json
 import logging
 import os
+from contextvars import ContextVar
 from typing import Dict, Any, Optional
 from contextlib import contextmanager
 from opentelemetry import trace, context
@@ -29,6 +30,23 @@ logger = logging.getLogger(__name__)
 AGENT_NAME = "weather-assistant"
 AGENT_VERSION = "1.0.0"
 AGENT_FRAMEWORK = "langchain"
+
+# ContextVar to pass root span from middleware to agent code
+# This allows execute() to access the middleware-created root span
+# even though trace.get_current_span() would return a child span
+_root_span_var: ContextVar = ContextVar('root_span', default=None)
+
+
+def get_root_span():
+    """Get the root span created by tracing middleware.
+
+    Use this instead of trace.get_current_span() when you need to set
+    attributes on the root span (e.g., mlflow.spanOutputs for streaming).
+
+    Returns:
+        The root span, or None if not in a traced request context.
+    """
+    return _root_span_var.get()
 
 # OpenInference semantic conventions
 try:
@@ -414,6 +432,10 @@ def create_tracing_middleware():
                 "gen_ai.agent.invoke",
                 kind=SpanKind.SERVER,
             ) as span:
+                # Store span in ContextVar so agent code can access it
+                # This is needed because trace.get_current_span() in execute()
+                # returns the innermost span (A2A span), not our root span
+                span_token = _root_span_var.set(span)
                 # Set input attributes (Prompt column in MLflow)
                 if user_input:
                     span.set_attribute("gen_ai.prompt", user_input[:1000])
@@ -511,6 +533,9 @@ def create_tracing_middleware():
                     span.set_status(Status(StatusCode.ERROR, str(e)))
                     span.record_exception(e)
                     raise
+                finally:
+                    # Reset the ContextVar to avoid leaking span reference
+                    _root_span_var.reset(span_token)
         finally:
             # Always detach the context to restore parent chain for other requests
             context.detach(detach_token)
