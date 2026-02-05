@@ -427,15 +427,27 @@ def create_tracing_middleware():
         detach_token = context.attach(empty_ctx)
 
         try:
-            # Create root span with MLflow/GenAI attributes
+            # Create root span with correct GenAI naming convention
+            # Per https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-agent-spans/
+            # Span name: "invoke_agent {gen_ai.agent.name}" when name is available
+            span_name = f"invoke_agent {AGENT_NAME}"
+
             with tracer.start_as_current_span(
-                "gen_ai.agent.invoke",
-                kind=SpanKind.SERVER,
+                span_name,
+                kind=SpanKind.INTERNAL,  # In-process agent (not remote service)
             ) as span:
                 # Store span in ContextVar so agent code can access it
                 # This is needed because trace.get_current_span() in execute()
                 # returns the innermost span (A2A span), not our root span
                 span_token = _root_span_var.set(span)
+
+                # === GenAI Semantic Conventions (Required) ===
+                # Per https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-agent-spans/
+                span.set_attribute("gen_ai.operation.name", "invoke_agent")
+                span.set_attribute("gen_ai.provider.name", AGENT_FRAMEWORK)
+                span.set_attribute("gen_ai.agent.name", AGENT_NAME)
+                span.set_attribute("gen_ai.agent.version", AGENT_VERSION)
+
                 # Set input attributes (Prompt column in MLflow)
                 if user_input:
                     span.set_attribute("gen_ai.prompt", user_input[:1000])
@@ -468,11 +480,7 @@ def create_tracing_middleware():
                     span.set_attribute("mlflow.user", "anonymous")
                     span.set_attribute("enduser.id", "anonymous")
 
-                # GenAI semantic conventions
-                span.set_attribute("gen_ai.agent.name", AGENT_NAME)
-                span.set_attribute("gen_ai.agent.version", AGENT_VERSION)
-                span.set_attribute("gen_ai.system", AGENT_FRAMEWORK)
-
+                # OpenInference span kind (for Phoenix)
                 if OPENINFERENCE_AVAILABLE:
                     span.set_attribute(
                         SpanAttributes.OPENINFERENCE_SPAN_KIND,
