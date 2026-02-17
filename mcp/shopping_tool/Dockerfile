@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM docker.io/library/python:3.11-slim
 
 WORKDIR /app
 
@@ -25,4 +25,3 @@ EXPOSE 8000
 
 # Run the server
 CMD ["python", "shopping_agent.py"]
-
